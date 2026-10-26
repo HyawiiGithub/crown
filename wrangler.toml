@@ -52,7 +52,7 @@ not_found_handling = "single-page-application"
 
 [vars]
 ENVIRONMENT = "production"
-PUBLIC_ORIGIN = "https://crowngamestudios.com"
+PUBLIC_ORIGIN = "https://www.crowngamestudios.com"
 
 # Secrets -- set with `wrangler secret put <NAME>`:
 #   DISCORD_CLIENT_ID
