@@ -827,6 +827,14 @@ app.all("*", async (c) => {
 export default app;
 
 // Keep tree-shaking honest about the re-exports the UI relies on.
+export default app;
+
+// Durable Object entrypoint export — wrangler.toml declares class_name = "SimObject",
+// so Wrangler requires a class named SimObject to be exported from this file.
+export { SimObject } from "./sim/SimObject";
+
+// Keep tree-shaking honest about the re-exports the UI relies on.
 export { capabilitiesFor, has, ALL_CAPABILITIES, CAPABILITY_LABELS };
 export type { Env };
 export const COUNTRY_IDS = ALL_ISO3;
+
