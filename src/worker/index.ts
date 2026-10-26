@@ -824,7 +824,6 @@ app.all("*", async (c) => {
   return c.env.ASSETS.fetch(c.req.raw);
 });
 
-export default app;
 
 // Keep tree-shaking honest about the re-exports the UI relies on.
 export default app;
