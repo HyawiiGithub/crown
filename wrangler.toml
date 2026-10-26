@@ -31,7 +31,7 @@ new_sqlite_classes = ["SimObject"]
 [[d1_databases]]
 binding = "DB"
 database_name = "crown"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "7cbab889-2032-46b0-97ce-871dd9e4cf4e"
 migrations_dir = "migrations"
 
 # ---------------------------------------------------------------------------
@@ -39,7 +39,7 @@ migrations_dir = "migrations"
 # ---------------------------------------------------------------------------
 [[kv_namespaces]]
 binding = "KV"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "40b94f28109249b6a55817827c5f898c"
 
 # ---------------------------------------------------------------------------
 # Static assets (the built Vite app) served by the Worker when you do NOT want
