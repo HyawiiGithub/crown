@@ -51,9 +51,8 @@ binding = "ASSETS"
 not_found_handling = "single-page-application"
 
 [vars]
-ENVIRONMENT = "development"
-PUBLIC_ORIGIN = "http://localhost:5173"
-SESSION_COOKIE = "crown_session"
+ENVIRONMENT = "production"
+PUBLIC_ORIGIN = "https://crowngamestudios.com"
 
 # Secrets -- set with `wrangler secret put <NAME>`:
 #   DISCORD_CLIENT_ID
