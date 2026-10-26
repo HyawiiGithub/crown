@@ -1,0 +1,62 @@
+name = "crown"
+main = "src/worker/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ---------------------------------------------------------------------------
+# The site itself is a static Vite build deployed to Cloudflare Pages.
+# This Worker is the API + the live simulation host.
+# ---------------------------------------------------------------------------
+
+[observability]
+enabled = true
+
+# ---------------------------------------------------------------------------
+# Durable Object: one instance per world. This is the resident process that
+# runs the real-time continuous simulation. Without it a Worker cannot hold a
+# world in memory, and the world has to tick every second.
+# ---------------------------------------------------------------------------
+[[durable_objects.bindings]]
+name = "SIM"
+class_name = "SimObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SimObject"]
+
+# ---------------------------------------------------------------------------
+# D1: catalogue + persistence. Users, sessions mirror, scenarios, worlds
+# registry, world snapshots/archives, audit log, bans.
+# ---------------------------------------------------------------------------
+[[d1_databases]]
+binding = "DB"
+database_name = "crown"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+# ---------------------------------------------------------------------------
+# KV: session cache, scenario cache, leaderboards, rate-limit counters.
+# ---------------------------------------------------------------------------
+[[kv_namespaces]]
+binding = "KV"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# ---------------------------------------------------------------------------
+# Static assets (the built Vite app) served by the Worker when you do NOT want
+# a separate Pages deployment. Comment this out if you deploy to Pages.
+# ---------------------------------------------------------------------------
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[vars]
+ENVIRONMENT = "development"
+PUBLIC_ORIGIN = "http://localhost:5173"
+SESSION_COOKIE = "crown_session"
+
+# Secrets -- set with `wrangler secret put <NAME>`:
+#   DISCORD_CLIENT_ID
+#   DISCORD_CLIENT_SECRET
+#   SESSION_SECRET
+#   BOOTSTRAP_ADMIN_DISCORD_IDS   (comma separated, first logins become owners)

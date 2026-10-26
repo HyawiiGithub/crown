@@ -1,0 +1,45 @@
+{
+  "name": "crown",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "CROWN - a real-time world economic & political simulation with a full developer control room",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "concurrently -n vite,worker -c cyan,magenta \"npm:dev:web\" \"npm:dev:api\"",
+    "dev:web": "vite",
+    "dev:api": "wrangler dev --port 8787",
+    "build": "npm run build:web",
+    "build:web": "tsc -p tsconfig.web.json --noEmit && vite build",
+    "typecheck": "tsc -p tsconfig.web.json --noEmit && tsc -p tsconfig.api.json --noEmit",
+    "lint": "eslint .",
+    "db:migrate": "wrangler d1 migrations apply crown --local",
+    "db:migrate:remote": "wrangler d1 migrations apply crown --remote",
+    "deploy": "npm run build:web && wrangler deploy",
+    "deploy:pages": "npm run build:web && wrangler pages deploy dist --project-name crown"
+  },
+  "dependencies": {
+    "d3-geo": "^3.1.1",
+    "hono": "^4.7.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "topojson-client": "^3.1.0",
+    "zustand": "^5.0.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241205.0",
+    "@types/d3-geo": "^3.1.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/topojson-client": "^3.0.0",
+    "@types/topojson-specification": "^1.0.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5",
+    "wrangler": "^3.99.0"
+  }
+}
