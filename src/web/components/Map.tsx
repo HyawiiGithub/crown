@@ -3,7 +3,7 @@ import { geoNaturalEarth1, geoGraticule10, geoPath, type GeoPath, type GeoProjec
 import { feature } from "topojson-client";
 import type { Topology } from "topojson-specification";
 import type { Country, Front, MapRegion, War } from "../../shared/types";
-import { COUNTRY_BY_ISO3 } from "../../data/countries";
+import { COUNTRY_BY_ISO3, TERRITORY_OWNER } from "../../data/countries";
 import { frontOccupation } from "../../sim/occupation";
 import { makeScale, sampleRamp, type ScaleId, type Theme } from "../theme";
 
@@ -45,6 +45,8 @@ interface Drawn {
   path: string;
   centroid: [number, number];
   area: number;
+  /** The largest single landmass: where a name belongs. */
+  main: { x: number; y: number; w: number; h: number; area: number };
 }
 
 const WORLD_URL = "/geo/countries-50m.json";
@@ -108,7 +110,11 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
       if (key === "010") continue;
       const d = pathGen(f as never);
       if (!d) continue;
-      out.push({ key, numeric: key, name: String(f.properties?.name ?? key), path: d, centroid: pathGen.centroid(f as never) as [number, number], area: pathGen.area(f as never) });
+      const poly = largestPolygon(f, pathGen);
+      const shape = (poly ? { type: "Polygon", coordinates: poly } : f) as never;
+      const [cx, cy] = pathGen.centroid(shape);
+      const [[x0, y0], [x1, y1]] = pathGen.bounds(shape);
+      out.push({ key, numeric: key, name: String(f.properties?.name ?? key), path: d, centroid: pathGen.centroid(f as never) as [number, number], area: pathGen.area(f as never), main: { x: cx, y: cy, w: x1 - x0, h: y1 - y0, area: pathGen.area(shape) } });
     }
     return out;
   }, [raw, pathGen]);
@@ -195,23 +201,36 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
 
   // ---- labels: the biggest polygon of each major polity -------------------
   const labels = useMemo(() => {
-    const best = new Map<string, { x: number; y: number; area: number; total: number }>();
+    const best = new Map<string, Drawn["main"]>();
     for (const f of drawn) {
       const id = control[f.key];
-      if (!id) continue;
+      // Overseas territories do not carry the owner's name: no "Denmark" on Greenland.
+      if (!id || TERRITORY_OWNER[f.key]) continue;
       const cur = best.get(id);
-      if (!cur) best.set(id, { x: f.centroid[0], y: f.centroid[1], area: f.area, total: f.area });
-      else {
-        cur.total += f.area;
-        if (f.area > cur.area) {
-          cur.x = f.centroid[0];
-          cur.y = f.centroid[1];
-          cur.area = f.area;
-        }
-      }
+      if (!cur || f.main.area > cur.area) best.set(id, f.main);
     }
-    return [...best.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, 70).map(([id, v]) => ({ id, ...v }));
+    return [...best.entries()].sort((a, b) => b[1].area - a[1].area).map(([id, main]) => ({ id, ...main }));
   }, [drawn, control]);
+
+  // Fit each name inside its land at this zoom, biggest countries first, and never overlap.
+  const placedLabels = useMemo(() => {
+    const k = transform.k;
+    const taken: { x0: number; y0: number; x1: number; y1: number }[] = [];
+    const out: { id: string; name: string; x: number; y: number; font: number }[] = [];
+    for (const l of labels) {
+      const name = countries[l.id]?.name;
+      if (!name) continue;
+      const font = Math.min(13, (l.w * k * 0.92) / (name.length * 0.56), l.h * k * 0.7);
+      if (font < 8) continue;
+      const halfW = (font * name.length * 0.56) / 2 / k + 1 / k;
+      const halfH = (font * 0.65) / k;
+      const box = { x0: l.x - halfW, y0: l.y - halfH, x1: l.x + halfW, y1: l.y + halfH };
+      if (taken.some((t) => box.x0 < t.x1 && box.x1 > t.x0 && box.y0 < t.y1 && box.y1 > t.y0)) continue;
+      taken.push(box);
+      out.push({ id: l.id, name, x: l.x, y: l.y, font });
+    }
+    return out;
+  }, [labels, countries, transform.k]);
 
   // ---- interaction --------------------------------------------------------
   const applyZoom = useCallback((factor: number, cx: number, cy: number) => {
@@ -351,19 +370,11 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
             <path key={`hl-${r.id}`} d={r.d} clipPath={`url(#clip-${r.id})`} fill="none" stroke={r.owner === selected ? "var(--ink)" : "var(--accent-2)"} strokeWidth={r.owner === selected ? 1.5 : 1.1} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
           ))}
 
-          {labels.map((l) => {
-            const c = countries[l.id];
-            if (!c) return null;
-            // Only draw a name once the territory is big enough on screen to hold it.
-            const screenWidth = Math.sqrt(l.area) * transform.k;
-            const fontPx = clampNum((screenWidth / Math.max(5, c.name.length)) * 1.7, 0, 13);
-            if (fontPx < 7.5) return null;
-            return (
-              <text key={l.id} x={l.x} y={l.y} textAnchor="middle" dominantBaseline="middle" fontSize={fontPx / transform.k} className="map__label" style={{ pointerEvents: "none" }} stroke={theme.ocean} strokeWidth={2.4 / transform.k} paintOrder="stroke">
-                {c.name}
-              </text>
-            );
-          })}
+          {placedLabels.map((l) => (
+            <text key={l.id} x={l.x} y={l.y} textAnchor="middle" dominantBaseline="central" fontSize={l.font / transform.k} className="map__label" style={{ pointerEvents: "none" }} stroke={theme.ocean} strokeWidth={2.4 / transform.k} paintOrder="stroke">
+              {l.name}
+            </text>
+          ))}
         </g>
       </svg>
 
