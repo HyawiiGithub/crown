@@ -1,0 +1,393 @@
+import type { BudgetPlan, Character, Company, Country, PolicyArea, PolicyPatch, SectorId, TaxPolicy, Treaty, World } from "../shared/types";
+import { pushEvent, rulesByDecree } from "./bootstrap";
+import { SimEngine, setSpeed } from "./engine";
+import { stabilisationPlan } from "./step-economy";
+import { clamp, clamp01, type Rng } from "./rng";
+import { applyPolicy, introduceBill, needsLegislature } from "./step-politics";
+import { declareWar, imposeSanction, liftSanction, signTreaty } from "./step-world";
+
+/**
+ * Everything the player can do. The sim is the single authority: the UI only
+ * sends these commands, and every refusal explains itself.
+ *
+ * In a democracy, law goes through parliament as a bill and can be voted down.
+ * Autocrats and colonial governors just decree it. Levers the executive really
+ * holds (trade measures, war, diplomacy, central bank orders) apply at once.
+ */
+
+export interface CommandResult {
+  ok: boolean;
+  message: string;
+  data?: unknown;
+}
+
+const TAX_LIMITS: Record<keyof TaxPolicy, number> = { income: 0.8, corporate: 0.7, vat: 0.35, payroll: 0.4, tariff: 1, royalty: 0.9 };
+const BUDGET_KEYS: (keyof BudgetPlan)[] = ["defence", "welfare", "health", "education", "infrastructure", "science", "administration", "subsidies"];
+
+function describePolicy(c: Country, p: PolicyPatch): { title: string; summary: string; opinion: number } {
+  const parts: string[] = [];
+  let opinion = 50;
+  if (p.tax) {
+    for (const [k, v] of Object.entries(p.tax)) {
+      const cur = c.economy.tax[k as keyof TaxPolicy];
+      const nv = v as number;
+      parts.push(`${k} tax ${(cur * 100).toFixed(1)}% to ${(nv * 100).toFixed(1)}%`);
+      opinion -= (nv - cur) * 160;
+    }
+  }
+  if (p.budget) {
+    for (const [k, v] of Object.entries(p.budget)) {
+      const cur = c.economy.budget[k as keyof BudgetPlan];
+      const nv = v as number;
+      parts.push(`${k} ${(cur * 100).toFixed(1)}% to ${(nv * 100).toFixed(1)}% of GDP`);
+      if (k === "welfare" || k === "health" || k === "education") opinion += (nv - cur) * 220;
+    }
+  }
+  if (p.minimumWage !== undefined) {
+    parts.push(`minimum wage to ${(p.minimumWage * 100).toFixed(0)}% of the median`);
+    opinion += (p.minimumWage - c.economy.macro.minimumWage) * 30;
+  }
+  if (p.sector) {
+    const bits = [p.sector.subsidy !== undefined ? `subsidy ${(p.sector.subsidy * 100).toFixed(0)}%` : "", p.sector.regulation !== undefined ? `regulation ${(p.sector.regulation * 100).toFixed(0)}` : "", p.sector.stateOwnership !== undefined ? `state share ${(p.sector.stateOwnership * 100).toFixed(0)}%` : ""].filter(Boolean);
+    parts.push(`${p.sector.id}: ${bits.join(", ")}`);
+  }
+  if (p.centralBankIndependent !== undefined) parts.push(p.centralBankIndependent ? "central bank independence" : "government control of the central bank");
+  const title = p.tax && p.budget ? "Budget and Finance Bill" : p.tax ? "Finance Bill" : p.budget ? "Appropriations Bill" : p.minimumWage !== undefined ? "Minimum Wage Bill" : p.sector ? `${capitalise(p.sector.id)} Sector Bill` : "Central Bank Bill";
+  return { title, summary: parts.join("; "), opinion: clamp(opinion, 5, 95) };
+}
+
+function capitalise(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function enact(world: World, c: Country, patch: PolicyPatch): CommandResult {
+  const d = describePolicy(c, patch);
+  if (!d.summary) return { ok: false, message: "Nothing has changed." };
+  if (needsLegislature(c)) {
+    const chamber = c.legislature!.chambers[0];
+    const hogParty = c.executive.coalition[0] ?? c.parties[0]?.id ?? "";
+    const pending = Object.values(world.bills).filter((b) => b.country === c.id && (b.status === "introduced" || b.status === "in-committee")).length;
+    if (pending >= 6) return { ok: false, message: "Parliament already has six government bills to get through." };
+    const bill = introduceBill(world, c.id, {
+      title: d.title, summary: d.summary, body: "", category: patch.tax || patch.budget ? "money" : "ordinary",
+      sponsorId: c.executive.headOfGovernmentId ?? "", sponsorPartyId: hogParty, chamberId: chamber.id, passageChambers: [chamber.id],
+      effects: {}, cost: 0, whipStrength: world.params.whipStrength, publicOpinion: d.opinion, policy: patch,
+    });
+    return bill ? { ok: true, message: `${d.title} sent to the ${chamber.name}. The vote is in three weeks.` } : { ok: false, message: "The bill could not be introduced." };
+  }
+  applyPolicy(c, patch);
+  c.executive.approval = clamp(c.executive.approval + (d.opinion - 50) * 0.04, 0, 100);
+  pushEvent(world, { kind: "legal", severity: "notice", country: c.id, title: `${c.name}: ${d.title.replace("Bill", "Decree")}`, body: d.summary, tags: ["decree"] });
+  return { ok: true, message: `Decreed: ${d.summary}` };
+}
+
+export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Record<string, unknown>): CommandResult {
+  const type = String(body.type ?? "");
+  if (type === "set-speed") {
+    const out = setSpeed(world, Number(body.speed ?? world.speed), body.paused === undefined ? undefined : Boolean(body.paused));
+    world.events.pop();
+    world.ticker.shift();
+    return out;
+  }
+  if (type === "advance") {
+    engine.advanceDays(clamp(Math.round(Number(body.days ?? 30)), 1, 3650));
+    return { ok: true, message: `Advanced ${body.days} days.` };
+  }
+  if (type === "choose-country") {
+    const c = world.countries[String(body.country ?? "")];
+    if (!c || c.annexedBy) return { ok: false, message: "That state does not exist." };
+    world.playerCountry = c.id;
+    return { ok: true, message: `You now govern ${c.name}.` };
+  }
+
+  const c = world.playerCountry ? world.countries[world.playerCountry] : undefined;
+  if (!c) return { ok: false, message: "Choose a country to govern first." };
+  if (c.annexedBy) return { ok: false, message: `${c.name} no longer exists.` };
+  const e = c.economy;
+
+  switch (type) {
+    case "apply-policy": {
+      const patch: PolicyPatch = {};
+      if (body.tax) {
+        patch.tax = {};
+        for (const [k, v] of Object.entries(body.tax as Record<string, number>)) {
+          const key = k as keyof TaxPolicy;
+          if (TAX_LIMITS[key] === undefined) continue;
+          patch.tax[key] = clamp(Number(v), 0, TAX_LIMITS[key]);
+        }
+      }
+      if (body.budget) {
+        patch.budget = {};
+        for (const [k, v] of Object.entries(body.budget as Record<string, number>)) {
+          const key = k as keyof BudgetPlan;
+          if (!BUDGET_KEYS.includes(key)) continue;
+          patch.budget[key] = clamp(Number(v), 0, 0.5);
+        }
+      }
+      if (body.minimumWage !== undefined) patch.minimumWage = clamp(Number(body.minimumWage), 0, 1);
+      return enact(world, c, patch);
+    }
+    case "set-sector":
+      return enact(world, c, { sector: { id: String(body.id) as SectorId, subsidy: num(body.subsidy), regulation: num(body.regulation), stateOwnership: num(body.stateOwnership) } });
+    case "set-rate": {
+      if (e.centralBank.independent) return { ok: false, message: "The central bank is independent. It sets rates itself." };
+      if (e.centralBank.regime === "union") return { ok: false, message: "Rates are set by the currency union." };
+      e.monetary.centralBankRate = clamp(Number(body.value), -0.01, 5);
+      return { ok: true, message: `Policy rate target set to ${(e.monetary.centralBankRate * 100).toFixed(2)}%.` };
+    }
+    case "set-independence":
+      return enact(world, c, { centralBankIndependent: Boolean(body.value) });
+    case "set-printing": {
+      if (e.centralBank.regime === "union") return { ok: false, message: "A currency union member cannot print money." };
+      if (e.centralBank.independent) return { ok: false, message: "An independent central bank refuses to finance the deficit." };
+      e.centralBank.printing = clamp01(Number(body.value));
+      return { ok: true, message: e.centralBank.printing > 0 ? `${(e.centralBank.printing * 100).toFixed(0)}% of the deficit will be financed by printing money.` : "The printing presses stop." };
+    }
+    case "set-target": {
+      e.centralBank.target = clamp(Number(body.value), 0, 0.2);
+      return { ok: true, message: `Inflation target is now ${(e.centralBank.target * 100).toFixed(1)}%.` };
+    }
+    case "set-qe": {
+      if (e.centralBank.regime === "union") return { ok: false, message: "Asset purchases are run by the currency union." };
+      e.centralBank.qe = clamp(Number(body.value), 0, 1);
+      return { ok: true, message: `Central bank holdings set to ${(e.centralBank.qe * 100).toFixed(0)}% of GDP.` };
+    }
+    case "set-regime": {
+      const regime = String(body.value);
+      if (regime !== "float" && regime !== "peg" && regime !== "gold") return { ok: false, message: "Unknown monetary regime." };
+      if (e.centralBank.regime === "union") return { ok: false, message: "You would have to leave the currency union first." };
+      e.centralBank.regime = regime;
+      if (regime === "gold") e.centralBank.target = 0;
+      pushEvent(world, { kind: "economic", severity: "major", country: c.id, title: `${c.name} moves to ${regime === "float" ? "a floating currency" : regime === "gold" ? "the gold standard" : "a currency peg"}`, body: "The monetary regime has changed.", tags: ["monetary"] });
+      return { ok: true, message: "Monetary regime changed." };
+    }
+    case "stabilisation-plan": {
+      if (e.monetary.inflation < 0.15) return { ok: false, message: "Inflation is not high enough to need this." };
+      stabilisationPlan(world, c);
+      c.executive.approval = clamp(c.executive.approval - 3, 0, 100);
+      return { ok: true, message: "Stabilisation plan announced. Expect a short recession." };
+    }
+    case "trade-barrier": {
+      const p = world.countries[String(body.partner)];
+      if (!p) return { ok: false, message: "No such partner." };
+      const value = clamp01(Number(body.value));
+      c.tradeBarriers ??= {};
+      if (value <= 0) delete c.tradeBarriers[p.id];
+      else c.tradeBarriers[p.id] = value;
+      c.relations[p.id] = clamp((c.relations[p.id] ?? 0) - value * 25, -100, 100);
+      p.relations[c.id] = clamp((p.relations[c.id] ?? 0) - value * 30, -100, 100);
+      p.tradeBarriers ??= {};
+      if (value >= 0.2 && p.id !== world.playerCountry && (p.relations[c.id] ?? 0) < 10) p.tradeBarriers[c.id] = value * 0.6;
+      if (value >= 1 || value >= 0.25) pushEvent(world, { kind: "diplomatic", severity: "major", country: c.id, title: value >= 1 ? `${c.name} embargoes ${p.name}` : `${c.name} raises tariffs on ${p.name}`, body: `An extra ${(value * 100).toFixed(0)}% barrier on bilateral trade.`, actors: [c.id, p.id], tags: ["trade"] });
+      return { ok: true, message: value > 0 ? `${(value * 100).toFixed(0)}% barrier on ${p.name}.` : `Trade with ${p.name} normalised.` };
+    }
+    case "sanction": {
+      const s = imposeSanction(world, c.id, String(body.target), (String(body.kind ?? "financial")) as never, rng);
+      return s ? { ok: true, message: "Sanctions imposed." } : { ok: false, message: "Sanctions could not be imposed." };
+    }
+    case "lift-sanction": {
+      const s = world.sanctions[String(body.id)];
+      if (!s?.imposedBy.includes(c.id)) return { ok: false, message: "Those are not your sanctions." };
+      liftSanction(world, s.id);
+      return { ok: true, message: "Sanctions lifted." };
+    }
+    case "declare-war": {
+      const target = String(body.target);
+      if (c.overlord && c.dependencies) return { ok: false, message: `${c.name} cannot declare war without its overlord.` };
+      if (c.alliances.includes(target)) return { ok: false, message: "You cannot attack a treaty ally. Leave the treaty first." };
+      const war = declareWar(world, c.id, target, String(body.cause ?? "A territorial dispute."));
+      if (!war) return { ok: false, message: "War could not be declared." };
+      c.executive.approval = clamp(c.executive.approval + (rulesByDecree(c.government) ? 2 : -4), 0, 100);
+      return { ok: true, message: war.name };
+    }
+    case "seek-peace": {
+      const war = world.wars[String(body.war)];
+      if (!war || war.endedAt || !war.belligerents[c.id]) return { ok: false, message: "You are not fighting that war." };
+      const mine = war.exhaustion[c.id] ?? 0;
+      const others = Object.keys(war.belligerents).filter((b) => b !== c.id);
+      const theirs = others.reduce((a, b) => a + (war.exhaustion[b] ?? 0), 0) / Math.max(1, others.length);
+      const front = war.fronts.find((f) => f.belligerents.includes(c.id));
+      const position = front ? (front.belligerents[0] === c.id ? front.control : -front.control) : 0;
+      if (theirs + Math.max(0, position) * 0.3 < 28 && !body.force) return { ok: false, message: "The enemy still believes it can win. They refuse to talk yet." };
+      const reparations = position < -25 ? e.gdp * clamp((-position - 25) * 0.002, 0.01, 0.2) : 0;
+      if (reparations > 0) e.fiscal.debt += reparations;
+      war.endedAt = world.t;
+      war.outcome = "white-peace";
+      for (const b of Object.keys(war.belligerents)) {
+        const x = world.countries[b];
+        if (x) x.wars = x.wars.filter((w) => w !== war.id);
+        for (const a of war.belligerents[b] ?? []) {
+          const y = world.countries[a];
+          if (y) y.wars = y.wars.filter((w) => w !== war.id);
+        }
+      }
+      pushEvent(world, { kind: "military", severity: "major", country: c.id, title: `Peace ends the ${war.name}`, body: reparations > 0 ? `${c.name} accepts terms and pays ${(reparations / 1e9).toFixed(1)}B in reparations.` : "A negotiated peace on the current lines.", actors: Object.keys(war.belligerents), tags: ["war", "peace"] });
+      return { ok: true, message: "Peace signed." + (mine > 70 ? " Your army was close to breaking." : "") };
+    }
+    case "offer-treaty": {
+      const partner = world.countries[String(body.partner)];
+      const kind = String(body.kind ?? "trade") as Treaty["kind"];
+      if (!partner) return { ok: false, message: "No such state." };
+      const rel = partner.relations[c.id] ?? 0;
+      const need: Partial<Record<Treaty["kind"], number>> = { alliance: 45, "defensive-pact": 40, trade: -5, "customs-union": 25, "non-aggression": -25 };
+      if (rel < (need[kind] ?? 20)) return { ok: false, message: `${partner.name} declines. Relations of ${rel.toFixed(0)} are too low; they want ${need[kind] ?? 20}.` };
+      const t = signTreaty(world, kind, [c.id, partner.id], [`Signed by ${c.name} and ${partner.name}.`], rng, Math.min(e.gdp, partner.economy.gdp) * 0.01);
+      return t ? { ok: true, message: `${t.name} signed.` } : { ok: false, message: "The treaty failed." };
+    }
+    case "leave-treaty": {
+      const t = world.treaties[String(body.id)];
+      if (!t?.parties.includes(c.id)) return { ok: false, message: "You are not party to that treaty." };
+      t.parties = t.parties.filter((p) => p !== c.id);
+      if (t.parties.length < 2) t.active = false;
+      c.alliances = c.alliances.filter((a) => !t.parties.includes(a));
+      for (const p of t.parties) {
+        c.relations[p] = clamp((c.relations[p] ?? 0) - 25, -100, 100);
+        const o = world.countries[p];
+        if (o) {
+          o.relations[c.id] = clamp((o.relations[c.id] ?? 0) - 25, -100, 100);
+          o.alliances = o.alliances.filter((x) => x !== c.id);
+        }
+      }
+      pushEvent(world, { kind: "diplomatic", severity: "major", country: c.id, title: `${c.name} leaves ${t.name}`, body: "The treaty partners are not pleased.", tags: ["treaty"] });
+      return { ok: true, message: `Left ${t.name}.` };
+    }
+    case "diplomatic-mission": {
+      const p = world.countries[String(body.partner)];
+      if (!p) return { ok: false, message: "No such state." };
+      const cost = e.gdp * 0.0002;
+      e.fiscal.debt += cost;
+      const boost = rng.float(3, 9);
+      p.relations[c.id] = clamp((p.relations[c.id] ?? 0) + boost, -100, 100);
+      c.relations[p.id] = clamp((c.relations[p.id] ?? 0) + boost, -100, 100);
+      return { ok: true, message: `Relations with ${p.name} improve by ${boost.toFixed(0)}.` };
+    }
+    case "imf-bailout": {
+      if (world.startDate.year < 1950) return { ok: false, message: "There is no IMF in this era. Try the London bankers." };
+      if (e.macro.riskPremium < 0.05 && !e.macro.defaulted) return { ok: false, message: "Your borrowing costs are not bad enough to qualify." };
+      const amount = e.gdp * 0.1;
+      e.reserves += amount;
+      e.macro.riskPremium *= 0.6;
+      e.macro.debtCost *= 0.85;
+      e.macro.bailout = true;
+      e.macro.defaulted = false;
+      for (const k of BUDGET_KEYS) e.budget[k] *= k === "defence" ? 0.85 : 0.92;
+      e.tax.vat = clamp(e.tax.vat * 1.1, 0, 0.3);
+      e.centralBank.printing = 0;
+      c.executive.approval = clamp(c.executive.approval - 9, 0, 100);
+      pushEvent(world, { kind: "economic", severity: "major", country: c.id, title: `${c.name} accepts an IMF programme`, body: `A ${(amount / 1e9).toFixed(0)}B loan comes with spending cuts and a VAT rise.`, tags: ["debt"] });
+      return { ok: true, message: "IMF programme agreed. Austerity follows." };
+    }
+    case "default": {
+      if (e.macro.defaulted) return { ok: false, message: "You are already in default." };
+      const haircut = clamp(Number(body.haircut ?? 0.4), 0.1, 0.8);
+      e.fiscal.debt *= 1 - haircut;
+      e.macro.defaulted = true;
+      e.macro.shock -= 0.06;
+      e.macro.shockDecay = 0.8;
+      c.executive.approval = clamp(c.executive.approval - 8, 0, 100);
+      pushEvent(world, { kind: "economic", severity: "catastrophic", country: c.id, title: `${c.name} repudiates its debts`, body: `Bondholders lose ${(haircut * 100).toFixed(0)}%. International lending dries up.`, tags: ["crisis", "debt"] });
+      return { ok: true, message: "You have defaulted." };
+    }
+    case "nationalise":
+    case "privatise": {
+      const co = world.companies[String(body.company)];
+      if (!co || co.country !== c.id) return { ok: false, message: "That company is outside your jurisdiction." };
+      return ownership(world, c, co, type === "nationalise");
+    }
+    case "bail-out": {
+      const co = world.companies[String(body.company)];
+      if (!co || co.country !== c.id) return { ok: false, message: "That company is outside your jurisdiction." };
+      const cost = Math.max(co.debt * 0.7, co.revenue * 0.1);
+      e.fiscal.debt += cost;
+      co.debt -= Math.min(co.debt, cost);
+      co.insolvent = false;
+      co.stateOwnership = clamp01(co.stateOwnership + 0.2);
+      pushEvent(world, { kind: "corporate", severity: "major", country: c.id, title: `${c.name} bails out ${co.name}`, body: `The state takes on ${(cost / 1e9).toFixed(1)}B and a 20% stake.`, tags: ["corporate"] });
+      return { ok: true, message: `${co.name} rescued for ${(cost / 1e9).toFixed(1)}B.` };
+    }
+    case "set-policy-lever": {
+      const area = String(body.area) as PolicyArea;
+      if (!(area in c.policies)) return { ok: false, message: "Unknown policy." };
+      c.policies[area] = clamp(Number(body.value), -100, 100);
+      return { ok: true, message: `${area} stance updated.` };
+    }
+    case "appoint": {
+      const area = String(body.area) as PolicyArea;
+      const m = c.executive.ministers.find((x) => x.id === area);
+      const name = String(body.name ?? "").trim().slice(0, 60);
+      if (!m || !name) return { ok: false, message: "Choose a post and a name." };
+      const ch: Character = {
+        id: `ch-${c.id}-apt-${world.dayCount}-${area}`, name, country: c.id, role: "minister", partyId: c.executive.coalition[0],
+        stats: { competence: Math.round(rng.normal() * 22 + 20), charisma: Math.round(rng.normal() * 22), integrity: Math.round(rng.normal() * 25), ambition: 30, ideology: c.ideology, popularity: 50, experience: 45, militancy: 0 },
+        createdAt: world.t,
+      };
+      world.characters[ch.id] = ch;
+      m.characterId = ch.id;
+      return { ok: true, message: `${name} is the new ${m.title}.`, data: { competence: ch.stats.competence } };
+    }
+    case "emergency-powers": {
+      if (rulesByDecree(c.government)) return { ok: false, message: "You already rule by decree." };
+      const on = Boolean(body.value);
+      c.executive.emergencyPowers = on;
+      c.executive.approval = clamp(c.executive.approval - (on ? 12 : -4), 0, 100);
+      c.cohesion = clamp(c.cohesion - (on ? 8 : 0), 0, 100);
+      pushEvent(world, { kind: "political", severity: "major", country: c.id, title: on ? `${c.name}: state of emergency declared` : `${c.name}: state of emergency lifted`, body: on ? "Parliament is bypassed. The government rules by decree." : "Normal government resumes.", tags: ["emergency"] });
+      return { ok: true, message: on ? "You now rule by emergency decree." : "Emergency powers ended." };
+    }
+    case "call-election": {
+      if (c.nextElectionAt === undefined) return { ok: false, message: "There are no elections here." };
+      c.nextElectionAt = world.t + 45 * 86400;
+      pushEvent(world, { kind: "political", severity: "major", country: c.id, title: `${c.name}: snap election called`, body: "Voters go to the polls in six weeks.", tags: ["election"] });
+      return { ok: true, message: "Snap election in six weeks." };
+    }
+    case "military": {
+      const m = c.military;
+      if (body.mobilise !== undefined) {
+        const move = Math.round(m.reserves * clamp01(Number(body.mobilise)));
+        m.reserves -= move;
+        m.activeDuty += move;
+        e.macro.nairu = clamp(e.macro.nairu - 0.002, 0.01, 0.3);
+        return { ok: true, message: `${move.toLocaleString("en-US")} reservists called up.` };
+      }
+      if (body.conscription !== undefined) {
+        m.conscription = Boolean(body.conscription);
+        if (m.conscription) m.reserves = Math.round(m.reserves * 1.5);
+        return { ok: true, message: m.conscription ? "Conscription introduced." : "Conscription abolished." };
+      }
+      return { ok: false, message: "No military order given." };
+    }
+    default:
+      return { ok: false, message: `Unknown command "${type}".` };
+  }
+}
+
+function ownership(world: World, c: Country, co: Company, nationalise: boolean): CommandResult {
+  if (nationalise) {
+    if (co.stateOwnership >= 0.99) return { ok: false, message: `${co.name} is already state owned.` };
+    const compensation = co.valuation * (1 - co.stateOwnership) * 0.6;
+    c.economy.fiscal.debt += compensation;
+    co.stateOwnership = 1;
+    co.listed = false;
+    for (const ex of world.markets.exchanges) ex.listings = ex.listings.filter((x) => x !== co.id);
+    world.markets.riskAppetite = clamp(world.markets.riskAppetite - (co.valuation / Math.max(1, world.globals.globalGdp)) * 30, 1, 99);
+    c.economy.macro.businessConfidence = clamp(c.economy.macro.businessConfidence - 6, 0, 100);
+    pushEvent(world, { kind: "corporate", severity: "major", country: c.id, title: `${c.name} nationalises ${co.name}`, body: `Owners are compensated ${(compensation / 1e9).toFixed(1)}B. Investors take note.`, tags: ["corporate"] });
+    return { ok: true, message: `${co.name} nationalised for ${(compensation / 1e9).toFixed(1)}B.` };
+  }
+  if (co.stateOwnership <= 0.01) return { ok: false, message: `${co.name} is not state owned.` };
+  const proceeds = co.valuation * co.stateOwnership;
+  c.economy.fiscal.debt = Math.max(0, c.economy.fiscal.debt - proceeds);
+  co.stateOwnership = 0;
+  const ex = world.markets.exchanges.find((x) => x.country === c.id);
+  if (ex) {
+    co.exchangeId = ex.id;
+    co.listed = true;
+    if (!ex.listings.includes(co.id)) ex.listings.push(co.id);
+  }
+  pushEvent(world, { kind: "corporate", severity: "major", country: c.id, title: `${c.name} privatises ${co.name}`, body: `The sale raises ${(proceeds / 1e9).toFixed(1)}B to pay down debt.`, tags: ["corporate"] });
+  return { ok: true, message: `${co.name} sold for ${(proceeds / 1e9).toFixed(1)}B.` };
+}
+
+function num(v: unknown): number | undefined {
+  return v === undefined || v === null ? undefined : Number(v);
+}

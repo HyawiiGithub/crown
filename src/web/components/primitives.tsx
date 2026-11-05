@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
 // ===========================================================================
 // Small shared components. Every panel in the app is built from these, which is
@@ -121,5 +121,41 @@ export function Slider({ label, value, min, max, step, onChange, suffix }: { lab
       </span>
       <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} />
     </label>
+  );
+}
+/**
+ * A one-series trend line with its title above it and a hover readout. One colour,
+ * no legend; the title names the series. `zero` draws a reference line at 0 when it
+ * falls inside the range.
+ */
+export function Spark({ title, values, format, zero }: { title: string; values: number[]; format: (v: number) => string; zero?: boolean }) {
+  const [hover, setHover] = useState<number | null>(null);
+  const w = 160;
+  const h = 44;
+  const pad = 3;
+  const lo = Math.min(...values, zero ? 0 : Infinity);
+  const hi = Math.max(...values, zero ? 0 : -Infinity);
+  const span = hi - lo || 1;
+  const x = (i: number) => pad + (i / Math.max(1, values.length - 1)) * (w - pad * 2);
+  const y = (v: number) => h - pad - ((v - lo) / span) * (h - pad * 2);
+  const d = values.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+  const onMove = (e: ReactPointerEvent<SVGSVGElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const f = (e.clientX - r.left) / r.width;
+    setHover(Math.max(0, Math.min(values.length - 1, Math.round(f * (values.length - 1)))));
+  };
+  const shownIndex = hover ?? values.length - 1;
+  return (
+    <figure className="spark">
+      <figcaption className="row" style={{ justifyContent: "space-between" }}>
+        <span className="stat__label">{title}</span>
+        <span className="mono" style={{ fontSize: 12 }}>{format(values[shownIndex])}</span>
+      </figcaption>
+      <svg viewBox={`0 0 ${w} ${h}`} width="100%" height={h} preserveAspectRatio="none" role="img" aria-label={`${title}, latest ${format(values[values.length - 1])}`} onPointerMove={onMove} onPointerLeave={() => setHover(null)}>
+        {zero && lo < 0 && hi > 0 && <line x1={0} x2={w} y1={y(0)} y2={y(0)} stroke="var(--rule)" strokeWidth={1} vectorEffect="non-scaling-stroke" />}
+        <path d={d} fill="none" stroke="var(--accent-2)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+        {hover !== null && <line x1={x(hover)} x2={x(hover)} y1={0} y2={h} stroke="var(--ink-muted)" strokeWidth={1} vectorEffect="non-scaling-stroke" />}
+      </svg>
+    </figure>
   );
 }

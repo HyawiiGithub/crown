@@ -1,354 +1,362 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { geoNaturalEarth1, geoGraticule10, geoPath } from "d3-geo";
+import { geoNaturalEarth1, geoGraticule10, geoPath, type GeoPath } from "d3-geo";
 import { feature } from "topojson-client";
 import type { Topology } from "topojson-specification";
-import type { Country, War } from "../../shared/types";
-import { COUNTRY_BY_NUMERIC } from "../../data/countries";
+import type { Country, MapRegion, War } from "../../shared/types";
+import { COUNTRY_BY_ISO3 } from "../../data/countries";
 import { makeScale, sampleRamp, type ScaleId, type Theme } from "../theme";
 
 /**
  * The world map.
  *
- * Entirely offline: Natural Earth country geometry is vendored into
- * /geo/countries-50m.json at build time and joined to the simulation by ISO
- * 3166-1 numeric code. No tile server, no external request, no API key.
- *
- * Zoom and pan are implemented directly on the projection transform rather than
- * with a library, because a full map library would be several times the size of
- * this entire application and we only need two gestures.
+ * Natural Earth geometry is vendored in /geo/countries-50m.json, so there is no
+ * tile server and no API key. Every polygon is painted by whoever controls it in
+ * the current scenario (`control`), and sub-national historical territory such as
+ * Alsace-Lorraine is drawn from `regions`, clipped to the modern polygons it sits
+ * inside. A German Empire or a Soviet Union is simply many polygons with one owner.
  */
 
 export type MapLayer = "political" | "gdp" | "gdpPc" | "growth" | "inflation" | "unemployment" | "debt" | "approval" | "ideology" | "bloc" | "war" | "relations";
 
 interface MapProps {
   countries: Record<string, Country>;
+  control: Record<string, string>;
+  regions: MapRegion[];
   wars: War[];
   layer: MapLayer;
   selected?: string;
-  onSelect?: (iso3: string) => void;
+  player?: string;
+  onSelect?: (id: string) => void;
   focus?: { iso3: string; relations?: Record<string, number> } | null;
   theme: Theme;
-  height?: number;
 }
 
-interface Geometry {
-  id: string;
+interface RawFeature {
+  id?: string | number;
+  properties?: Record<string, unknown>;
+  geometry?: unknown;
+}
+
+interface Drawn {
+  key: string;
+  numeric: string;
   name: string;
   path: string;
   centroid: [number, number];
-  /** Simple point-in-polygon test used to decide which side of a front a capital is on. */
-  contains?: (lon: number, lat: number) => boolean;
-  rings: number[][][][];
+  area: number;
 }
 
 const WORLD_URL = "/geo/countries-50m.json";
+let rawCache: RawFeature[] | null = null;
 
-let cachedWorld: { features: Geometry[]; graticule: string } | null = null;
-
-async function loadWorld(width: number, height: number): Promise<{ features: Geometry[]; graticule: string }> {
-  if (cachedWorld) return cachedWorld;
+async function loadFeatures(): Promise<RawFeature[]> {
+  if (rawCache) return rawCache;
   const res = await fetch(WORLD_URL);
   if (!res.ok) throw new Error(`Map geometry unavailable (${res.status})`);
   const topo = (await res.json()) as Topology;
-  const collection = topo.objects.countries as unknown as Parameters<typeof feature>[1];
-  const fc = feature(topo, collection) as unknown as { type: string; features: { id?: string | number; properties?: Record<string, unknown>; geometry?: { type?: string; coordinates?: unknown } }[] };
-  const projection = geoNaturalEarth1().fitExtent([[6, 6], [width - 6, height - 6]], fc as never);
-  const path = geoPath(projection);
-
-  const features: Geometry[] = [];
-  for (const f of fc.features) {
-    const id = String(f.id ?? "").padStart(3, "0");
-    const d = path(f as never);
-    if (!d) continue;
-    const centroid = path.centroid(f as never);
-    features.push({
-      id,
-      name: (f.properties?.name as string) ?? id,
-      path: d,
-      centroid: centroid[0] > -180 ? [centroid[0], centroid[1]] : [0, 0],
-      rings: geometryRings(f),
-    });
-  }
-
-  const graticule = path(geoGraticule10()) ?? "";
-  cachedWorld = { features, graticule };
-  return cachedWorld;
+  const fc = feature(topo, topo.objects.countries as never) as unknown as { features: RawFeature[] };
+  rawCache = fc.features;
+  return rawCache;
 }
 
-/** Pull polygon rings out of a GeoJSON geometry for cheap containment tests. */
-function geometryRings(f: { geometry?: { type?: string; coordinates?: unknown } }): number[][][][] {
-  const g = f.geometry;
-  if (!g) return [];
-  if (g.type === "Polygon") return [g.coordinates as number[][][]];
-  if (g.type === "MultiPolygon") return g.coordinates as number[][][][];
-  return [];
+/** Land keys used by `control`: ISO numeric where there is one, the feature name where there is not. */
+function featureKey(f: RawFeature): string {
+  const id = f.id === undefined || f.id === null || f.id === "" ? "" : String(f.id).padStart(3, "0");
+  return id || String(f.properties?.name ?? "");
 }
 
-export function WorldMap({ countries, wars, layer, selected, onSelect, focus, theme, height }: MapProps) {
+export function WorldMap({ countries, control, regions, wars, layer, selected, player, onSelect, focus, theme }: MapProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ w: 1000, h: height ?? 600 });
-  const [world, setWorld] = useState<{ features: Geometry[]; graticule: string } | null>(cachedWorld);
+  const [size, setSize] = useState({ w: 1000, h: 600 });
+  const [raw, setRaw] = useState<RawFeature[] | null>(rawCache);
+  const [failed, setFailed] = useState(false);
   const [transform, setTransform] = useState({ k: 1, x: 0, y: 0 });
-  const [hover, setHover] = useState<{ x: number; y: number; iso3: string } | null>(null);
-  const drag = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
-  const pinch = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const [hover, setHover] = useState<{ x: number; y: number; id: string; place: string } | null>(null);
+  const drag = useRef<{ x: number; y: number; tx: number; ty: number; moved: boolean } | null>(null);
 
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => {
+    const measure = () => {
       const r = el.getBoundingClientRect();
-      setSize({ w: Math.max(320, r.width), h: height ?? Math.max(360, r.height) });
-    });
+      setSize({ w: Math.max(320, r.width), h: Math.max(320, r.height) });
+    };
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
-    const r = el.getBoundingClientRect();
-    setSize({ w: Math.max(320, r.width), h: height ?? Math.max(360, r.height) });
+    measure();
     return () => ro.disconnect();
-  }, [height]);
+  }, []);
 
   useEffect(() => {
     let alive = true;
-    loadWorld(size.w, size.h)
-      .then((w) => {
-        if (alive) setWorld(w);
-      })
-      .catch(() => setWorld(null));
+    loadFeatures().then((f) => alive && setRaw(f)).catch(() => alive && setFailed(true));
     return () => {
       alive = false;
     };
-  }, [size.w, size.h]);
+  }, []);
 
-  // ---- joins -------------------------------------------------------------
+  // ---- geometry, one projection for everything ----------------------------
+  const projection = useMemo(() => geoNaturalEarth1().fitExtent([[6, 6], [size.w - 6, size.h - 6]], { type: "Sphere" } as never), [size.w, size.h]);
+  const pathGen = useMemo<GeoPath>(() => geoPath(projection), [projection]);
 
-  /** ISO numeric -> country id, for geometry we own. */
-  const numericToIso = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const [iso3, c] of Object.entries(countries)) m.set(c.isoNumeric, iso3);
-    return m;
-  }, [countries]);
+  const drawn = useMemo<Drawn[]>(() => {
+    if (!raw) return [];
+    const out: Drawn[] = [];
+    for (const f of raw) {
+      const key = featureKey(f);
+      if (key === "010") continue;
+      const d = pathGen(f as never);
+      if (!d) continue;
+      out.push({ key, numeric: key, name: String(f.properties?.name ?? key), path: d, centroid: pathGen.centroid(f as never) as [number, number], area: pathGen.area(f as never) });
+    }
+    return out;
+  }, [raw, pathGen]);
 
+  const graticule = useMemo(() => pathGen(geoGraticule10()) ?? "", [pathGen]);
+  const sphere = useMemo(() => pathGen({ type: "Sphere" } as never) ?? "", [pathGen]);
+
+  const regionPaths = useMemo(
+    () =>
+      regions.map((r) => {
+        const pts = r.ring.map((p) => projection(p)).filter(Boolean) as [number, number][];
+        return { ...r, d: `M${pts.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join("L")}Z`, cx: pts.reduce((a, p) => a + p[0], 0) / pts.length, cy: pts.reduce((a, p) => a + p[1], 0) / pts.length };
+      }),
+    [regions, projection],
+  );
+
+  // The hosts of a region are modern ISO3 codes; find their polygons to clip against.
+  const hostPaths = useMemo(() => {
+    const byIso = new Map<string, string>();
+    for (const c of drawn) byIso.set(c.key, c.path);
+    return byIso;
+  }, [drawn]);
+
+  // ---- layer colours ------------------------------------------------------
   const atWar = useMemo(() => {
     const s = new Set<string>();
     for (const w of wars) {
       if (w.endedAt) continue;
-      for (const b of Object.keys(w.belligerents)) s.add(b);
+      for (const [b, allies] of Object.entries(w.belligerents)) {
+        s.add(b);
+        for (const a of allies) s.add(a);
+      }
     }
     return s;
   }, [wars]);
 
   const scale = useMemo(() => {
     const rows = Object.values(countries)
-      .filter((c) => !c.annexedBy && !c.overlord)
-      .map((c) => ({
-        gdp: c.economy.gdp,
-        gdpPc: c.economy.gdpPerCapita,
-        growth: c.economy.gdpGrowth,
-        inflation: c.economy.monetary.inflation,
-        unemployment: c.economy.labour.unemployment,
-        debt: c.economy.fiscal.debtToGdp,
-        approval: c.executive.approval,
-        ideology: c.ideology,
-        bloc: c.bloc,
-      }));
+      .filter((c) => !c.annexedBy)
+      .map((c) => ({ gdp: c.economy.gdp, gdpPc: c.economy.gdpPerCapita, growth: c.economy.gdpGrowth, inflation: c.economy.monetary.inflation, unemployment: c.economy.labour.unemployment, debt: c.economy.fiscal.debtToGdp, approval: c.executive.approval, ideology: c.ideology, bloc: c.bloc }));
     return makeScale(layer as ScaleId, rows);
   }, [countries, layer]);
 
-  // ---- interaction -------------------------------------------------------
-
-  const applyZoom = useCallback((factor: number, cx: number, cy: number) => {
-    setTransform((t) => {
-      const k = Math.max(1, Math.min(24, t.k * factor));
-      const scaleUp = k / t.k;
-      return { k, x: cx - (cx - t.x) * scaleUp, y: cy - (cy - t.y) * scaleUp };
-    });
-  }, []);
-
-  const onWheel = useCallback(
-    (e: React.WheelEvent) => {
-      const rect = wrapRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      applyZoom(e.deltaY < 0 ? 1.18 : 1 / 1.18, e.clientX - rect.left, e.clientY - rect.top);
-    },
-    [applyZoom],
-  );
-
-  const onPointerDown = (e: React.PointerEvent) => {
-    (e.target as Element).setPointerCapture?.(e.pointerId);
-    if (pinch.current.size > 0) {
-      pinch.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      return;
-    }
-    drag.current = { x: e.clientX, y: e.clientY, tx: transform.x, ty: transform.y };
-  };
-
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (pinch.current.has(e.pointerId)) {
-      pinch.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      const pts = [...pinch.current.values()];
-      if (pts.length === 2) {
-        const rect = wrapRef.current?.getBoundingClientRect();
-        if (!rect) return;
-        const mid = { x: (pts[0].x + pts[1].x) / 2 - rect.left, y: (pts[0].y + pts[1].y) / 2 - rect.top };
-        const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
-        if (dist > 0) applyZoom(dist / 120, mid.x, mid.y);
-      }
-      return;
-    }
-    if (!drag.current) return;
-    const dx = e.clientX - drag.current.x;
-    const dy = e.clientY - drag.current.y;
-    setTransform((t) => ({ ...t, x: drag.current!.tx + dx, y: drag.current!.ty + dy }));
-  };
-
-  const endPointer = (e: React.PointerEvent) => {
-    drag.current = null;
-    pinch.current.delete(e.pointerId);
-    if (pinch.current.size === 0) pinch.current.clear();
-  };
-
-  const resetView = () => setTransform({ k: 1, x: 0, y: 0 });
-
-  /** Fly to a country by zooming about its centroid. */
-  const focusOn = useCallback(
-    (iso3: string) => {
-      if (!world) return;
-      const iso = countries[iso3];
-      if (!iso) return;
-      const g = world.features.find((f) => f.id === iso.isoNumeric);
-      if (!g) return;
-      const k = 5;
-      setTransform({ k, x: size.w / 2 - g.centroid[0] * k, y: size.h / 2 - g.centroid[1] * k });
-    },
-    [world, countries, size],
-  );
-
-  useEffect(() => {
-    if (focus?.iso3) focusOn(focus.iso3);
-  }, [focus?.iso3, focusOn]);
-
-  const hovered = hover ? countries[hover.iso3] : undefined;
-
-  // ---- render ------------------------------------------------------------
-
-  const projectionForFocus = useMemo(() => (world ? geoNaturalEarth1().fitExtent([[6, 6], [size.w - 6, size.h - 6]], { type: "Sphere" } as never) : null), [world, size.w, size.h]);
-  const pathGen = useMemo(() => (projectionForFocus ? geoPath(projectionForFocus) : null), [projectionForFocus]);
-
-  const graticulePath = useMemo(() => {
-    if (!pathGen) return "";
-    return pathGen(geoGraticule10()) ?? "";
-  }, [pathGen]);
-
   const fills = useMemo(() => {
     const m = new Map<string, string>();
-    for (const [iso3, c] of Object.entries(countries)) {
-      if (c.annexedBy) {
-        m.set(iso3, theme.stroke);
-        continue;
+    for (const [id, c] of Object.entries(countries)) {
+      if (layer === "war") m.set(id, atWar.has(id) ? "#b91c1c" : theme.unclaimed);
+      else if (layer === "political") m.set(id, c.mapColor);
+      else if (layer === "relations" && focus?.relations) {
+        const rel = id === focus.iso3 ? undefined : focus.relations[id];
+        m.set(id, rel === undefined ? theme.unclaimed : sampleRamp("magma", (rel + 100) / 200));
+      } else {
+        m.set(id, scale.fill({ gdp: c.economy.gdp, gdpPc: c.economy.gdpPerCapita, growth: c.economy.gdpGrowth, inflation: c.economy.monetary.inflation, unemployment: c.economy.labour.unemployment, debt: c.economy.fiscal.debtToGdp, approval: c.executive.approval, ideology: c.ideology, bloc: c.bloc }));
       }
-      if (layer === "war") {
-        m.set(iso3, atWar.has(iso3) ? "#b91c1c" : c.overlord ? shade(theme.unclaimed, -0.1) : theme.unclaimed);
-        continue;
-      }
-      if (layer === "political") {
-        m.set(iso3, c.mapColor);
-        continue;
-      }
-      if (layer === "relations" && focus?.relations) {
-        const rel = focus.relations[iso3];
-        m.set(iso3, rel === undefined ? theme.unclaimed : sampleRamp("magma", (rel + 100) / 200));
-        continue;
-      }
-      if (c.overlord) {
-        m.set(iso3, shade(theme.unclaimed, -0.12));
-        continue;
-      }
-      m.set(iso3, scale.fill({ gdp: c.economy.gdp, gdpPc: c.economy.gdpPerCapita, growth: c.economy.gdpGrowth, inflation: c.economy.monetary.inflation, unemployment: c.economy.labour.unemployment, debt: c.economy.fiscal.debtToGdp, approval: c.executive.approval, ideology: c.ideology, bloc: c.bloc }));
     }
     return m;
   }, [countries, layer, scale, theme, atWar, focus]);
 
+  // ---- labels: the biggest polygon of each major polity -------------------
+  const labels = useMemo(() => {
+    const best = new Map<string, { x: number; y: number; area: number; total: number }>();
+    for (const f of drawn) {
+      const id = control[f.key];
+      if (!id) continue;
+      const cur = best.get(id);
+      if (!cur) best.set(id, { x: f.centroid[0], y: f.centroid[1], area: f.area, total: f.area });
+      else {
+        cur.total += f.area;
+        if (f.area > cur.area) {
+          cur.x = f.centroid[0];
+          cur.y = f.centroid[1];
+          cur.area = f.area;
+        }
+      }
+    }
+    return [...best.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, 70).map(([id, v]) => ({ id, ...v }));
+  }, [drawn, control]);
+
+  // ---- interaction --------------------------------------------------------
+  const applyZoom = useCallback((factor: number, cx: number, cy: number) => {
+    setTransform((t) => {
+      const k = Math.max(1, Math.min(40, t.k * factor));
+      const up = k / t.k;
+      return k === 1 ? { k: 1, x: 0, y: 0 } : { k, x: cx - (cx - t.x) * up, y: cy - (cy - t.y) * up };
+    });
+  }, []);
+
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      applyZoom(e.deltaY < 0 ? 1.2 : 1 / 1.2, e.clientX - rect.left, e.clientY - rect.top);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [applyZoom]);
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    drag.current = { x: e.clientX, y: e.clientY, tx: transform.x, ty: transform.y, moved: false };
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!drag.current || e.buttons === 0) return;
+    const dx = e.clientX - drag.current.x;
+    const dy = e.clientY - drag.current.y;
+    if (Math.abs(dx) + Math.abs(dy) > 4) drag.current.moved = true;
+    if (drag.current.moved) setTransform((t) => ({ ...t, x: drag.current!.tx + dx, y: drag.current!.ty + dy }));
+  };
+  const endDrag = () => {
+    window.setTimeout(() => {
+      drag.current = null;
+    }, 0);
+  };
+  const pick = (id: string) => {
+    if (!drag.current?.moved) onSelect?.(id);
+  };
+  const track = (e: React.MouseEvent, id: string, place: string) => {
+    const rect = wrapRef.current?.getBoundingClientRect();
+    if (rect) setHover({ x: e.clientX - rect.left, y: e.clientY - rect.top, id, place });
+  };
+
+  const hovered = hover ? countries[hover.id] : undefined;
+  const strokeWidth = 0.5;
+
   return (
-    <div
-      ref={wrapRef}
-      style={{ position: "absolute", inset: 0, touchAction: "none" }}
-      onWheel={onWheel}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={endPointer}
-      onPointerCancel={endPointer}
-      onPointerLeave={() => {
-        endPointer({ pointerId: -1 } as React.PointerEvent);
-        setHover(null);
-      }}
-    >
+    <div ref={wrapRef} style={{ position: "absolute", inset: 0, touchAction: "none" }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} onPointerLeave={() => setHover(null)}>
       <svg className="map" width={size.w} height={size.h} viewBox={`0 0 ${size.w} ${size.h}`}>
-        <rect className="map__sphere" width={size.w} height={size.h} />
-        <path className="map__graticule" d={graticulePath} />
+        <rect width={size.w} height={size.h} fill={theme.ocean} />
         <g transform={`translate(${transform.x} ${transform.y}) scale(${transform.k})`}>
-          {world?.features.map((f) => {
-            const iso3 = numericToIso.get(f.id);
-            const c = iso3 ? countries[iso3] : undefined;
-            if (!iso3 || !c) {
-              // Land we do not simulate: neutral, clearly not part of the world.
-              return <path key={f.id} className="map__country" d={f.path} fill={theme.unclaimed} opacity={0.35} stroke="none" />;
-            }
-            const isSel = selected === iso3;
-            const fill = fills.get(iso3) ?? theme.unclaimed;
+          <path d={sphere} className="map__sphere" />
+          <path className="map__graticule" d={graticule} strokeWidth={0.4} />
+          {drawn.map((f, i) => {
+            const id = control[f.key];
+            const c = id ? countries[id] : undefined;
+            if (!id || !c) return <path key={`${f.key}-${i}`} d={f.path} fill={theme.unclaimed} stroke={theme.stroke} strokeWidth={strokeWidth} opacity={0.5} />;
             return (
               <path
-                key={f.id}
+                key={`${f.key}-${i}`}
                 className="map__country"
                 d={f.path}
-                fill={fill}
-                opacity={c.annexedBy ? 0.35 : c.overlord ? 0.75 : 1}
-                stroke={isSel ? "var(--ink)" : undefined}
-                strokeWidth={isSel ? 1.4 : undefined}
-                onMouseMove={(e) => {
-                  const rect = wrapRef.current?.getBoundingClientRect();
-                  if (!rect) return;
-                  setHover({ x: e.clientX - rect.left, y: e.clientY - rect.top, iso3 });
-                }}
+                fill={fills.get(id) ?? theme.unclaimed}
+                stroke={theme.stroke}
+                strokeWidth={strokeWidth}
+                onMouseMove={(e) => track(e, id, f.name)}
                 onMouseLeave={() => setHover(null)}
-                onClick={() => onSelect?.(iso3)}
+                onClick={() => pick(id)}
                 style={{ cursor: "pointer" }}
               />
+            );
+          })}
+
+          <defs>
+            {regionPaths.map((r) => (
+              <clipPath id={`clip-${r.id}`} key={r.id}>
+                {r.hosts.map((iso) => {
+                  const d = hostPaths.get(numericOf(iso));
+                  return d ? <path key={iso} d={d} /> : null;
+                })}
+              </clipPath>
+            ))}
+          </defs>
+          {regionPaths.map((r) => {
+            const c = countries[r.owner];
+            if (!c) return null;
+            return (
+              <path
+                key={r.id}
+                className="map__country"
+                d={r.d}
+                clipPath={`url(#clip-${r.id})`}
+                fill={fills.get(r.owner) ?? c.mapColor}
+                stroke={theme.stroke}
+                strokeWidth={strokeWidth}
+                onMouseMove={(e) => track(e, r.owner, r.name)}
+                onMouseLeave={() => setHover(null)}
+                onClick={() => pick(r.owner)}
+                style={{ cursor: "pointer" }}
+              />
+            );
+          })}
+
+          {/* Outlines for the player's country and the selection, every polygon they own. */}
+          {drawn.map((f, i) => {
+            const id = control[f.key];
+            if (id !== selected && id !== player) return null;
+            return <path key={`hl-${f.key}-${i}`} d={f.path} fill="none" stroke={id === selected ? "var(--ink)" : "var(--accent-2)"} strokeWidth={id === selected ? 1.5 : 1.1} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />;
+          })}
+
+          {regionPaths.filter((r) => r.owner === selected || r.owner === player).map((r) => (
+            <path key={`hl-${r.id}`} d={r.d} clipPath={`url(#clip-${r.id})`} fill="none" stroke={r.owner === selected ? "var(--ink)" : "var(--accent-2)"} strokeWidth={r.owner === selected ? 1.5 : 1.1} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
+          ))}
+
+          {labels.map((l) => {
+            const c = countries[l.id];
+            if (!c) return null;
+            // Only draw a name once the territory is big enough on screen to hold it.
+            const screenWidth = Math.sqrt(l.area) * transform.k;
+            const fontPx = clampNum((screenWidth / Math.max(5, c.name.length)) * 1.7, 0, 13);
+            if (fontPx < 7.5) return null;
+            return (
+              <text key={l.id} x={l.x} y={l.y} textAnchor="middle" dominantBaseline="middle" fontSize={fontPx / transform.k} className="map__label" style={{ pointerEvents: "none" }} stroke={theme.ocean} strokeWidth={2.4 / transform.k} paintOrder="stroke">
+                {c.name}
+              </text>
             );
           })}
         </g>
       </svg>
 
+      {failed && <div className="map-overlay card" style={{ top: 12, bottom: "auto" }}>The map geometry could not be loaded. Reload the page.</div>}
+
       <div className="map-overlay">
-        <MapLegend scale={scale} theme={theme} />
+        <MapLegend scale={scale} layer={layer} />
       </div>
 
       <div className="map-controls">
-        <button className="btn btn--sm" onClick={() => applyZoom(1.4, size.w / 2, size.h / 2)} title="Zoom in">+</button>
-        <button className="btn btn--sm" onClick={() => applyZoom(1 / 1.4, size.w / 2, size.h / 2)} title="Zoom out">&minus;</button>
-        <button className="btn btn--sm" onClick={resetView} title="Reset view">Reset</button>
-        <span className="badge">{Math.round(transform.k * 100)}%</span>
+        <button className="btn btn--sm" onClick={() => applyZoom(1.5, size.w / 2, size.h / 2)} title="Zoom in">+</button>
+        <button className="btn btn--sm" onClick={() => applyZoom(1 / 1.5, size.w / 2, size.h / 2)} title="Zoom out">&minus;</button>
+        <button className="btn btn--sm" onClick={() => setTransform({ k: 1, x: 0, y: 0 })} title="Reset view">Reset</button>
       </div>
 
       {hover && hovered && (
-        <div className="map-tooltip" style={{ left: hover.x + 14, top: hover.y + 14 }}>
+        <div className="map-tooltip" style={{ left: Math.min(hover.x + 14, size.w - 230), top: Math.min(hover.y + 14, size.h - 90) }}>
           <div className="row" style={{ gap: 6 }}>
             <strong>{hovered.name}</strong>
             {atWar.has(hovered.id) && <span className="badge badge--war">war</span>}
           </div>
-          <div className="dim mono" style={{ fontSize: 11, marginTop: 2 }}>
-            {hovered.overlord ? `Possession of ${hovered.overlord}` : hovered.annexedBy ? "Abolished" : `${(hovered.economy.gdpGrowth * 100).toFixed(2)}% growth`}
-          </div>
+          {hover.place !== hovered.name && <div className="dim" style={{ fontSize: 11 }}>{hover.place}{hovered.overlord ? ` · under ${countries[hovered.overlord]?.name ?? hovered.overlord}` : ""}</div>}
+          <div className="dim mono" style={{ fontSize: 11, marginTop: 2 }}>GDP growth {(hovered.economy.gdpGrowth * 100).toFixed(1)}% · inflation {(hovered.economy.monetary.inflation * 100).toFixed(1)}%</div>
         </div>
       )}
     </div>
   );
 }
 
-function MapLegend({ scale, theme }: { scale: ReturnType<typeof makeScale>; theme: Theme }) {
+function clampNum(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+
+function numericOf(iso: string): string {
+  return COUNTRY_BY_ISO3[iso]?.numeric ?? iso;
+}
+
+function MapLegend({ scale, layer }: { scale: ReturnType<typeof makeScale>; layer: string }) {
+  if (layer === "political") return null;
   if (scale.kind === "categorical" && scale.categories?.length) {
     return (
       <div className="map-legend">
-        <div className="eyebrow">Scale</div>
-        <div className="row row--wrap" style={{ gap: 8, marginTop: 4 }}>
+        <div className="row row--wrap" style={{ gap: 8 }}>
           {scale.categories.slice(0, 9).map((c) => (
             <span key={c.id} className="row" style={{ gap: 4 }}>
               <span style={{ width: 9, height: 9, background: c.color, borderRadius: 2 }} />
@@ -362,25 +370,11 @@ function MapLegend({ scale, theme }: { scale: ReturnType<typeof makeScale>; them
   if (!scale.legend.length) return null;
   return (
     <div className="map-legend">
-      <div className="eyebrow">Scale</div>
       <div className="map-legend__scale">
         <span className="mono dim">{scale.legend[0].value}</span>
         <div className="map-legend__ramp" style={{ background: `linear-gradient(90deg, ${scale.legend.map((s) => s.color).join(", ")})` }} />
         <span className="mono dim">{scale.legend[scale.legend.length - 1].value}</span>
       </div>
-      {theme.texture === "vellum" && <div className="eyebrow" style={{ marginTop: 4 }}>Unclaimed land shown pale</div>}
     </div>
   );
 }
-
-function shade(hex: string, amt: number): string {
-  if (!hex.startsWith("#")) return hex;
-  const s = hex.slice(1);
-  const f = (i: number) => {
-    const v = parseInt(s.slice(i, i + 2), 16);
-    return Math.max(0, Math.min(255, Math.round(v * (1 + amt))));
-  };
-  return `#${((1 << 24) | (f(0) << 16) | (f(2) << 8) | f(4)).toString(16).slice(1)}`;
-}
-
-export { COUNTRY_BY_NUMERIC };

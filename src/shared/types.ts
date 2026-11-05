@@ -268,6 +268,22 @@ export interface SectorState {
   /** Extra modifier the state or a company can apply. */
   stateSubsidy: number;
   stateOwnership: number;
+  /** Annual value added, credits. */
+  output: number;
+  /** Real output index in scenario prices. */
+  quantity: number;
+  /** Productive capacity in the same units as quantity. */
+  capacity: number;
+  /** Sector price relative to the scenario start (1 = unchanged). */
+  price: number;
+  /** Average annual wage in the sector, credits. */
+  wage: number;
+  /** Operating margin, fraction of output. */
+  margin: number;
+  /** 0..1 market concentration (0 = perfect competition, 1 = monopoly). */
+  concentration: number;
+  /** 0..1 regulatory burden set by the government. */
+  regulation: number;
 }
 
 export interface FiscalState {
@@ -374,6 +390,138 @@ export interface EconomyState {
   reserves: number;
   /** Annual research & development spending. */
   rd: number;
+  macro: MacroState;
+  tax: TaxPolicy;
+  budget: BudgetPlan;
+  centralBank: CentralBankState;
+  accounts: NationalAccounts;
+  households: HouseholdGroup[];
+}
+
+/** Statutory rates the government sets, fractions. */
+export interface TaxPolicy {
+  income: number;
+  corporate: number;
+  vat: number;
+  payroll: number;
+  tariff: number;
+  royalty: number;
+}
+
+/** Planned spending by department, fraction of potential GDP. */
+export interface BudgetPlan {
+  defence: number;
+  welfare: number;
+  health: number;
+  education: number;
+  infrastructure: number;
+  science: number;
+  administration: number;
+  subsidies: number;
+}
+
+export type MonetaryRegime = "float" | "peg" | "gold" | "union" | "command";
+
+export interface CentralBankState {
+  /** An independent bank follows its Taylor rule; otherwise the government sets the rate. */
+  independent: boolean;
+  regime: MonetaryRegime;
+  /** Inflation target, fraction. */
+  target: number;
+  /** 0..1 how far expectations are anchored to the target. */
+  credibility: number;
+  /** Quantitative easing holdings, fraction of GDP. */
+  qe: number;
+  /** Share of the deficit financed by printing money, 0..1. */
+  printing: number;
+  currency: string;
+}
+
+/** Y = C + I + G + X - M, all annualised, nominal. */
+export interface NationalAccounts {
+  consumption: number;
+  investment: number;
+  government: number;
+  exports: number;
+  imports: number;
+}
+
+export interface MacroState {
+  /** Potential real GDP at scenario prices. */
+  potential: number;
+  /** Real GDP at scenario prices. */
+  realGdp: number;
+  /** GDP deflator, 1 at scenario start. */
+  priceLevel: number;
+  /** Real GDP over potential, minus one. */
+  outputGap: number;
+  capital: number;
+  tfpGrowth: number;
+  potentialGrowth: number;
+  expectedInflation: number;
+  nairu: number;
+  /** 0..100 */
+  consumerConfidence: number;
+  /** 0..100 */
+  businessConfidence: number;
+  neutralRate: number;
+  /** Long-term government bond yield. */
+  bondYield: number;
+  riskPremium: number;
+  /** Average interest paid on the existing debt stock. */
+  debtCost: number;
+  /** Bank credit to the private sector, fraction of GDP. */
+  credit: number;
+  /** Non-performing loans, fraction of credit. */
+  npl: number;
+  /** House price index, 100 at start. */
+  housePrice: number;
+  /** Current account, annualised credits. */
+  currentAccount: number;
+  /** Log deviation of the real exchange rate; positive is overvalued. */
+  realExchange: number;
+  /** (Exports + imports) / GDP at normal prices. */
+  openness: number;
+  /** Structural trade balance, fraction of GDP. */
+  structuralTradeBalance: number;
+  /** Deficit level the economy has adjusted to, fraction of GDP. */
+  deficitAnchor: number;
+  /** Temporary demand shock, decays. */
+  shock: number;
+  shockDecay: number;
+  /** Minimum wage as a fraction of the median wage. */
+  minimumWage: number;
+  /** Annual natural population growth. */
+  popGrowth: number;
+  /** Baseline budget used to measure long-run investment effects. */
+  baseBudget: BudgetPlan;
+  /** Real GDP ring, one sample per week for 52 weeks. */
+  realHistory: number[];
+  /** Price level ring, one sample per week for 52 weeks. */
+  priceHistory: number[];
+  /** Annualised currency depreciation last step. */
+  lastDepreciation?: number;
+  defaulted?: boolean;
+  bailout?: boolean;
+}
+
+export interface HouseholdGroup {
+  id: "working" | "middle" | "wealthy";
+  label: string;
+  /** Share of the population. */
+  popShare: number;
+  /** Share of pre-tax income. */
+  incomeShare: number;
+  /** Average annual disposable income per person, credits. */
+  income: number;
+  /** Disposable income deflated by the group's own price basket. */
+  realIncome: number;
+  /** Price of the group's basket, 1 at start. */
+  costOfLiving: number;
+  /** Share of disposable income saved. */
+  savingsRate: number;
+  /** 0..1 */
+  satisfaction: number;
 }
 
 export interface EconomyHistoryPoint {
@@ -567,7 +715,17 @@ export interface BillVote {
   choice: "aye" | "nay" | "abstain" | "absent" | "present";
 }
 
+export interface PolicyPatch {
+  tax?: Partial<TaxPolicy>;
+  budget?: Partial<BudgetPlan>;
+  minimumWage?: number;
+  sector?: { id: SectorId; subsidy?: number; regulation?: number; stateOwnership?: number };
+  centralBankIndependent?: boolean;
+}
+
 export interface Bill {
+  /** Policy applied if enacted. */
+  policy?: PolicyPatch;
   id: EntityId;
   country: Iso3;
   title: string;
@@ -772,7 +930,11 @@ export interface Front {
   attritionRate: number;
 }
 
+export interface Insurgency { id: string; name: string; strength: number }
+
 export interface War {
+  /** Non-state forces in this war, keyed by belligerent id. */
+  rebels?: Record<string, Insurgency>;
   id: EntityId;
   name: string;
   startedAt: SimSeconds;
@@ -863,6 +1025,16 @@ export type CompanyTier =
   | "monopoly";
 
 export interface Company {
+  /** Shares outstanding. */
+  shares?: number;
+  /** Net income after interest and tax, annualised. */
+  netIncome?: number;
+  /** Share of the home sector's output. */
+  marketShare?: number;
+  /** Price / earnings multiple. */
+  pe?: number;
+  /** Shares owned by the player's state fund. */
+  playerShares?: number;
   id: EntityId;
   name: string;
   country: Iso3;
@@ -970,6 +1142,19 @@ export type Commodity =
 // ===========================================================================
 
 export interface Country {
+  /** Modern ISO3 lands held. */
+  lands?: string[];
+  lat?: number;
+  lon?: number;
+  /** Date of the next national election, sim seconds. */
+  nextElectionAt?: SimSeconds;
+  electionTermDays?: number;
+  /** Date of the next vote for a directly elected executive. */
+  nextPresidentialAt?: SimSeconds;
+  /** Bilateral trade policy: partner -> extra tariff, 1 means full embargo. */
+  tradeBarriers?: Record<string, number>;
+  /** Name of the ruling party from the historical record. */
+  rulingPartyName?: string;
   id: Iso3;
   iso2: Iso2;
   isoNumeric: IsoNumeric;
@@ -1272,7 +1457,30 @@ export interface SimulationParams {
   seed: number;
 }
 
+export interface MapRegion {
+  id: string;
+  name: string;
+  owner: string;
+  hosts: string[];
+  ring: [number, number][];
+}
+
+export interface CommodityMarket {
+  supply: number;
+  demand: number;
+  trend: number;
+  inventory: number;
+}
+
 export interface World {
+  /** Country the player governs in singleplayer. */
+  playerCountry?: Iso3;
+  /** Map feature key (ISO numeric or land key) -> polity that controls it. */
+  control: Record<string, Iso3>;
+  regions: MapRegion[];
+  commodityMarkets: Record<string, CommodityMarket>;
+  /** Whole sim days already processed. */
+  dayCount: number;
   id: EntityId;
   name: string;
   scenarioId: string;

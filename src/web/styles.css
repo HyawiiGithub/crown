@@ -67,7 +67,7 @@ button { font: inherit; color: inherit; }
 .app {
   display: grid;
   grid-template-rows: var(--header-h) 1fr;
-  grid-template-columns: 300px 1fr 340px;
+  grid-template-columns: 270px 1fr 430px;
   grid-template-areas: 'head head head' 'left map right';
   height: 100%;
 }
@@ -224,10 +224,10 @@ label.field > span { display: block; font-size: 11px; color: var(--ink-muted); m
 
 .map { width: 100%; height: 100%; display: block; cursor: grab; }
 .map:active { cursor: grabbing; }
-.map__country { stroke: var(--mapstroke); stroke-width: .4; stroke-linejoin: round; transition: fill .35s ease; }
+.map__country { stroke-linejoin: round; vector-effect: non-scaling-stroke; transition: fill .35s ease; }
 .map__country:hover { stroke: var(--ink); stroke-width: .9; }
 .map__sphere { fill: var(--ocean); }
-.map__graticule { fill: none; stroke: var(--mapstroke); stroke-width: .3; opacity: .3; pointer-events: none; }
+.map__graticule { fill: none; stroke: var(--mapstroke); vector-effect: non-scaling-stroke; opacity: .3; pointer-events: none; }
 
 .map-overlay {
   position: absolute; top: 12px; left: 12px;
@@ -373,3 +373,54 @@ label.field > span { display: block; font-size: 11px; color: var(--ink-muted); m
   .app { grid-template-columns: 0 1fr 300px; }
   .rail-left { display: none; }
 }
+
+/* ===========================================================================
+   Singleplayer shell
+   =========================================================================== */
+
+.root-column { display: flex; flex-direction: column; height: 100%; }
+.root-screen { flex: 1; min-height: 0; position: relative; }
+.mp-warning {
+  flex: none;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #b45309;
+  color: #fff;
+  font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  z-index: 500;
+}
+.gate { height: 100%; }
+.ink-text { color: var(--ink); }
+.masthead { gap: 12px; flex-wrap: nowrap; overflow: hidden; }
+.masthead__date { font-size: 14px; color: var(--accent-2); white-space: nowrap; }
+.masthead__stats { gap: 12px; font-size: 11px; white-space: nowrap; overflow: hidden; }
+.time-controls { gap: 3px; flex: none; }
+.rail-left, .rail-right { min-height: 0; }
+.truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.map__label { fill: var(--ink); font-family: var(--font-display); font-weight: 600; letter-spacing: .02em; }
+.spark-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.spark { margin: 0; padding: 8px 10px; background: var(--bg-sunken); border: 1px solid var(--rule); border-radius: var(--radius); min-width: 0; }
+.slider { display: block; margin: 7px 0; cursor: pointer; }
+.slider input[type=range] { width: 100%; accent-color: var(--accent-2); margin: 2px 0 0; }
+.slider input[disabled] { opacity: .55; cursor: not-allowed; }
+.sticky-actions { position: sticky; bottom: 0; z-index: 3; background: var(--bg-raised); box-shadow: 0 -8px 16px rgba(0,0,0,.18); }
+.seatbar { display: flex; height: 14px; gap: 1px; border-radius: 4px; overflow: hidden; margin-bottom: 8px; }
+.seatbar span { min-width: 1px; }
+.front { display: flex; height: 6px; border-radius: 3px; overflow: hidden; margin-top: 2px; gap: 1px; }
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.66); display: grid; place-items: center; z-index: 150; padding: 20px; }
+.modal__body { width: min(780px, 100%); max-height: calc(100vh - 80px); display: flex; flex-direction: column; padding: 22px; background: var(--bg-raised); }
+.polity-list { flex: 1; min-height: 220px; overflow-y: auto; border: 1px solid var(--rule); border-radius: var(--radius); }
+.polity-row { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-bottom: 1px solid var(--rule); cursor: pointer; }
+.polity-row:hover { background: var(--bg-sunken); }
+.polity-row.active { outline: 2px solid var(--accent-2); outline-offset: -2px; }
+.save-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
+.save-card { display: flex; align-items: center; gap: 10px; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.rail-right .tabs { flex-wrap: wrap; overflow: visible; }
+.rail-right .tab { padding-left: 8px; padding-right: 8px; }

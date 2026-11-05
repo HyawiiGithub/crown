@@ -1,220 +1,116 @@
-import type { WarSeed } from "../shared/types";
+import type { TreatySeed, WarSeed } from "../shared/types";
 
 /**
- * Wars already underway (or recently ended) when a scenario opens.
+ * Conflicts actually under way, and treaties actually in force, on each
+ * scenario's start date. Ids are the polity ids used by that scenario's table.
  *
- * `belligerents` maps each belligerent ISO3 to the ISO3s of its allies in this
- * war, which the engine uses to pull allies in and to compute coalition strength.
- * `exhaustion` is 0..100 per belligerent; 100 means the government cannot fight
- * another day and must seek terms.
+ * `control` on a front runs -100..100 from the first belligerent's point of view.
  */
+const W = (name: string, cause: string, a: string[], b: string[], front: string, terrain: string, control: number, exA: number, exB: number, goal: string): WarSeed => ({
+  name,
+  startedAt: 0,
+  phase: "war",
+  cause,
+  belligerents: Object.fromEntries([[a[0], a.slice(1)], [b[0], b.slice(1)]]),
+  fronts: [{ name: front, belligerents: [a[0], b[0]], control, terrain: terrain as WarSeed["fronts"][number]["terrain"] }],
+  exhaustion: { [a[0]]: exA, [b[0]]: exB },
+  casualties: {},
+  warGoal: goal,
+});
+
 export const WARS_BY_YEAR: Record<number, WarSeed[]> = {
-  // ---------------------------------------------------------------- 1900 ---
   1900: [
-    {
-      name: "Second Boer War",
-      startedAt: 0,
-      phase: "war",
-      cause: "The uitlander vote in the Transvaal and the Jameson Raid.",
-      belligerents: { GBR: [], SAF: [] },
-      fronts: [{ name: "Transvaal", belligerents: ["GBR", "SAF"], control: 20, terrain: "plains" }, { name: "Orange Free State", belligerents: ["GBR", "SAF"], control: 10, terrain: "plains" }],
-      exhaustion: { GBR: 12, SAF: 48 },
-      casualties: { GBR: 14000, SAF: 12000 },
-      warGoal: "Annex the Transvaal and the Orange Free State as Crown colonies.",
-    },
-    {
-      name: "Philippine-American War",
-      startedAt: 0,
-      phase: "war",
-      cause: "The United States refuses to recognise Philippine independence after the Spanish-American War.",
-      belligerents: { USA: [], PHL: [] },
-      fronts: [{ name: "Luzon", belligerents: ["USA", "PHL"], control: 35, terrain: "urban" }],
-      exhaustion: { USA: 8, PHL: 42 },
-      casualties: { USA: 4200, PHL: 28000 },
-      warGoal: "Suppress the republic and impose American colonial administration.",
-    },
-    {
-      name: "Maji Maji Rebellion",
-      startedAt: 0,
-      phase: "crisis",
-      cause: "The imposition of the hinde tax on the Maji Maji ng'ombe cult movement.",
-      belligerents: { DEU: [], TZA: [] },
-      fronts: [{ name: "Ruvuma", belligerents: ["DEU", "TZA"], control: -30, terrain: "forest" }],
-      exhaustion: { DEU: 6, TZA: 30 },
-      casualties: { DEU: 500, TZA: 9000 },
-      warGoal: "German rule over German East Africa.",
-    },
+    W("Second Boer War", "The franchise of the uitlanders in the Transvaal and British claims over the goldfields.", ["GBR", "CPC", "CAN", "AUC", "NZL"], ["SAR", "OFS"], "Natal and the Veld", "plains", -10, 15, 25, "Annex the Boer republics."),
+    W("Philippine-American War", "The United States refused to recognise Philippine independence after the war with Spain.", ["USA", "UOT"], ["PHL_REB"], "Luzon", "forest", 35, 8, 40, "Suppress the First Philippine Republic."),
+    W("Thousand Days' War", "Liberal revolt against the Conservative government of Colombia.", ["COL"], ["COL_REB"], "Santander", "mountain", 20, 30, 40, "Hold the Conservative regime together."),
   ],
-
-  // ---------------------------------------------------------------- 1930 ---
+  1914: [
+    W("Mexican Revolution", "Constitutionalists and peasant armies rose after Huerta seized power in 1913.", ["MEX"], ["MEX_REB"], "Northern Mexico", "desert", -45, 55, 30, "Keep Huerta in power."),
+  ],
   1930: [
-    {
-      name: "Chinese Civil War",
-      startedAt: 0,
-      phase: "war",
-      cause: "The Kuomintang and the CCP contest the Republic of China after the Northern Expedition.",
-      belligerents: { CHN: [], COM: [], USA: [], CHI: [] },
-      fronts: [
-        { name: "Jiangxi Soviet", belligerents: ["COM", "CHN"], control: 22, terrain: "mountain" },
-        { name: "Central Plains", belligerents: ["CHN", "COM"], control: 45, terrain: "plains" },
-        { name: "Shanghai", belligerents: ["CHI", "COM"], control: 70, terrain: "urban" },
-      ],
-      exhaustion: { CHN: 40, COM: 52, USA: 4, CHI: 2 },
-      casualties: { CHN: 180000, COM: 120000 },
-      warGoal: "Unify China under one government.",
-    },
-    {
-      name: "Emigre Revolt in Dahomey",
-      startedAt: 0,
-      phase: "crisis",
-      cause: "Conscription and taxation imposed on the Fon people of Dahomey.",
-      belligerents: { FRA: [], DAH: [] },
-      fronts: [{ name: "Abomey", belligerents: ["FRA", "DAH"], control: -25, terrain: "forest" }],
-      exhaustion: { FRA: 8, DAH: 35 },
-      casualties: { FRA: 2000, DAH: 6000 },
-      warGoal: "End French rule in Dahomey.",
-    },
+    W("Central Plains War", "Regional warlords revolted against Chiang Kai-shek's disbandment of their armies.", ["CHN"], ["CHN_REB"], "Henan", "plains", 10, 25, 30, "Finish the unification of China under Nanjing."),
+    W("Pacification of Libya", "Senussi resistance led by Omar Mukhtar against Italian rule.", ["ITA", "ICO"], ["LBY_REB"], "Cyrenaica", "desert", 40, 10, 45, "End resistance in Cyrenaica."),
   ],
-
-  // ---------------------------------------------------------------- 1950 ---
   1950: [
-    {
-      name: "Korean War",
-      startedAt: 0,
-      phase: "attrition",
-      cause: "North Korean forces cross the 38th parallel to unify the peninsula by force.",
-      belligerents: { PRK: [], KOR: [], USA: [], CHN: [], USSR: [] },
-      fronts: [
-        { name: "Pusan Perimeter", belligerents: ["USA", "PRK"], control: 55, terrain: "mountain" },
-        { name: "Chongchon", belligerents: ["PRK", "KOR"], control: 62, terrain: "plains" },
-        { name: "Inchon", belligerents: ["USA", "KOR", "PRK"], control: -60, terrain: "coastal" },
-        { name: "Naktong Bulge", belligerents: ["KOR", "PRK"], control: -35, terrain: "forest" },
-      ],
-      exhaustion: { PRK: 58, KOR: 44, USA: 22, CHN: 14, USSR: 4 },
-      casualties: { PRK: 88000, KOR: 62000, USA: 36000, CHN: 60000, USSR: 1200 },
-      warGoal: "Restore the Republic of Korea north of the 38th parallel.",
-    },
-    {
-      name: "Indo-Pakistani War",
-      startedAt: 0,
-      phase: "war",
-      cause: "An accession crisis in Kashmir and a tribal incursion across the Line of Control.",
-      belligerents: { IND: [], PAK: [] },
-      fronts: [{ name: "Kashmir", belligerents: ["IND", "PAK"], control: 25, terrain: "mountain" }],
-      exhaustion: { IND: 26, PAK: 22 },
-      casualties: { IND: 45000, PAK: 26000 },
-      warGoal: "Annex Jammu and Kashmir.",
-    },
+    W("First Indochina War", "The Viet Minh are fighting to end French rule over Indochina.", ["FRA", "IDC"], ["DRV"], "Tonkin", "forest", -5, 30, 25, "Hold Indochina for the French Union."),
+    W("Malayan Emergency", "Communist insurgency against British rule in Malaya.", ["GBR", "BMA"], ["MLY_REB"], "Malayan Jungle", "forest", 15, 6, 30, "Destroy the Malayan National Liberation Army."),
   ],
-
-  // ---------------------------------------------------------------- 1990 ---
   1990: [
-    {
-      name: "Gulf War",
-      startedAt: 0,
-      phase: "negotiations",
-      cause: "Iraq invades Kuwait and the United States assembles a coalition under Article 51.",
-      belligerents: { IRQ: [], KWT: [], USA: [], SAU: [], GBR: [], EGY: [], SYR: [], MAR: [] },
-      fronts: [
-        { name: "Kuwait", belligerents: ["USA", "SAU", "IRQ"], control: -88, terrain: "desert" },
-        { name: "Southern Iraq", belligerents: ["USA", "IRQ"], control: 72, terrain: "desert" },
-      ],
-      exhaustion: { IRQ: 61, USA: 8, SAU: 12, KWT: 40, GBR: 4, EGY: 10, SYR: 6, MAR: 6 },
-      casualties: { IRQ: 20000, USA: 300, SAU: 1000, KWT: 500 },
-      warGoal: "Expel Iraq from Kuwait and destroy its nuclear programme.",
-    },
-    {
-      name: "Yugoslav Wars",
-      startedAt: 0,
-      phase: "war",
-      cause: "Slovenia and Croatia declare independence; Yugoslavia's People's Army intervenes.",
-      belligerents: { YUG: [], HRV: [], SVN: [], BIH: [] },
-      fronts: [
-        { name: "Croatia", belligerents: ["HRV", "YUG"], control: 58, terrain: "plains" },
-        { name: "Bosnia", belligerents: ["BIH", "YUG"], control: 5, terrain: "mountain" },
-        { name: "Slovenia", belligerents: ["SVN", "YUG"], control: -80, terrain: "mountain" },
-      ],
-      exhaustion: { YUG: 34, HRV: 28, SVN: 18, BIH: 55 },
-      casualties: { YUG: 12000, HRV: 8000, SVN: 300, BIH: 30000 },
-      warGoal: "Preserve Yugoslavia as a single state.",
-    },
+    W("Gulf Crisis", "Iraq invaded and annexed Kuwait on 2 August. A US-led coalition is massing in Saudi Arabia.", ["IRQ"], ["USA", "GBR", "FRA", "SAU", "EGY"], "Kuwait", "desert", 80, 40, 3, "Force Iraq out of Kuwait, or hold what has been taken."),
+    W("Afghan Civil War", "The mujahideen continue to fight the Soviet-backed government after the Soviet withdrawal.", ["AFG"], ["AFG_REB"], "Afghan Highlands", "mountain", 10, 60, 50, "Survive without Soviet troops."),
+    W("Liberian Civil War", "Charles Taylor's rebels and factions are fighting for Monrovia.", ["LBR"], ["LBR_REB"], "Monrovia", "urban", -30, 60, 40, "Control Monrovia."),
+    W("Ethiopian Civil War", "Eritrean and Tigrayan fronts are closing in on the Derg.", ["ETH"], ["ETH_REB"], "Tigray and Eritrea", "mountain", -40, 70, 40, "Preserve the Derg regime."),
   ],
-
-  // ---------------------------------------------------------------- 2026 ---
+  2010: [
+    W("War in Afghanistan", "NATO forces are fighting the Taliban insurgency, with a troop surge under way.", ["USA", "GBR", "CAN", "DEU", "AFG"], ["AFG_REB"], "Helmand and Kandahar", "mountain", 20, 28, 40, "Stabilise the Afghan government."),
+    W("Iraq Insurgency", "US forces are drawing down while sectarian insurgents remain active.", ["USA", "IRQ"], ["IRQ_REB"], "Baghdad", "urban", 50, 45, 55, "Hand security to Iraqi forces."),
+    W("War in Somalia", "Al-Shabaab controls much of the south against the Transitional Federal Government.", ["SOM", "ETH", "UGA"], ["SOM_REB"], "Mogadishu", "urban", -20, 55, 30, "Hold Mogadishu."),
+  ],
+  2020: [
+    W("Syrian Civil War", "Assad's government, backed by Russia and Iran, is fighting the last rebel holdouts in Idlib.", ["SYR", "RUS", "IRN"], ["SYR_REB", "TUR"], "Idlib", "urban", 65, 70, 60, "Reconquer Syria."),
+    W("Yemeni Civil War", "The Saudi-led coalition is fighting the Houthis, who hold Sanaa.", ["SAU", "YEM", "ARE"], ["YEM_REB"], "Marib", "desert", -25, 55, 45, "Restore the recognised government."),
+    W("War in Afghanistan", "Peace talks with the Taliban have begun under the February Doha agreement.", ["USA", "AFG"], ["AFG_REB"], "Afghan Provinces", "mountain", -10, 65, 45, "Withdraw without collapse."),
+    W("Libyan Civil War", "Haftar's forces are besieging Tripoli.", ["LBY", "TUR"], ["LBY_REB"], "Tripoli", "urban", 5, 45, 40, "Hold Tripoli."),
+  ],
   2026: [
-    {
-      name: "Sahel Insurgency",
-      startedAt: 0,
-      phase: "attrition",
-      cause: "A two-decade insurgency across the Mali, Niger and Burkina Faso tri-border zone.",
-      belligerents: { MLI: [], NER: [], BFA: [], TCD: [], FRA: [] },
-      fronts: [
-        { name: "Liptako", belligerents: ["MLI", "MLI2"], control: -25, terrain: "desert" },
-        { name: "Lake Chad Basin", belligerents: ["NGA", "MLI2"], control: -12, terrain: "plains" },
-      ],
-      exhaustion: { MLI: 46, NER: 52, BFA: 44, TCD: 30, FRA: 36 },
-      casualties: { MLI: 9000, NER: 4000, BFA: 6000, TCD: 2500, FRA: 1200 },
-      warGoal: "Restore state control over the Sahel.",
-    },
-    {
-      name: "Levant Front",
-      startedAt: 0,
-      phase: "war",
-      cause: "Escalation following the collapse of the ceasefire in the Golan corridor.",
-      belligerents: { ISR: [], SYR: [], IRN: [], LBN: [], YEM2: [] },
-      fronts: [
-        { name: "Golan Heights", belligerents: ["ISR", "SYR"], control: 12, terrain: "mountain" },
-        { name: "Lebanon Border", belligerents: ["ISR", "LBN"], control: -30, terrain: "mountain" },
-      ],
-      exhaustion: { ISR: 22, SYR: 48, IRN: 30, LBN: 55, YEM2: 40 },
-      casualties: { ISR: 900, SYR: 6000, IRN: 800, LBN: 4000, YEM2: 2000 },
-      warGoal: "Drive Israeli forces back to the 1967 line.",
-    },
+    W("Russo-Ukrainian War", "Russia launched a full-scale invasion of Ukraine in February 2022.", ["RUS"], ["UKR"], "Donbas and Zaporizhzhia", "plains", 22, 58, 62, "Force a settlement on the current line, or restore Ukraine's borders."),
+    W("Sudanese Civil War", "The Sudanese Armed Forces and Rapid Support Forces have fought since April 2023.", ["SDN"], ["SDN_REB"], "Darfur and Kordofan", "desert", -10, 70, 65, "Defeat the Rapid Support Forces."),
+    W("Myanmar Civil War", "Resistance forces and ethnic armies are fighting the junta.", ["MMR"], ["MMR_REB"], "Shan and Sagaing", "forest", -15, 60, 50, "Keep the junta in power."),
   ],
 };
 
-/**
- * Treaties in force at the start of each era. These seed the diplomacy panel and
- * give the engine the trade bonuses and guarantee obligations it needs to run
- * an alliance system without any special-casing.
- */
-export const TREATIES_BY_YEAR: Record<number, { name: string; kind: "alliance" | "non-aggression" | "trade" | "entente" | "peace" | "defensive-pact" | "access" | "customs-union" | "lend-lease"; parties: string[]; terms: string[]; tradeBonus?: number }[]> = {
+const T = (name: string, kind: TreatySeed["kind"], parties: string, terms: string): TreatySeed => ({ name, kind, parties: parties.split(" "), terms: [terms] });
+
+export const TREATIES_BY_YEAR: Record<number, TreatySeed[]> = {
   1900: [
-    { name: "Triple Entente", kind: "entente", parties: ["GBR", "FRA", "RUS"], terms: ["Consultation before any continental war", "No separate peace"], tradeBonus: 4.2e9 },
-    { name: "Triple Alliance", kind: "alliance", parties: ["DEU", "AUT", "ITA"], terms: ["Mutual defence", "No separate peace"] },
-    { name: "Franco-Russian Alliance", kind: "defensive-pact", parties: ["FRA", "RUS"], terms: ["Mutual assistance against Germany"] },
-    { name: "British-Japanese Alliance", kind: "alliance", parties: ["GBR", "JPN"], terms: ["Defence of British and Japanese possessions"], tradeBonus: 1.1e9 },
-    { name: "Reinsurance Treaty", kind: "non-aggression", parties: ["DEU", "RUS"], terms: ["Neutrality if either is attacked by a third power"] },
-    { name: "Treaty of Friendship, Britain and Portugal", kind: "access", parties: ["GBR", "PRT"], terms: ["Oldest active alliance in the world", "Preferential access to African ports"] },
-    { name: "Pan-American Union", kind: "non-aggression", parties: ["USA", "BRA", "ARG", "COL", "MEX", "CHL", "VEN"], terms: ["Reciprocal arbitration of disputes"] },
+    T("Triple Alliance", "defensive-pact", "DEU AUT ITA", "Mutual defence against France and Russia."),
+    T("Franco-Russian Alliance", "alliance", "FRA RUS", "Mutual defence against the Triple Alliance."),
+  ],
+  1914: [
+    T("Triple Alliance", "defensive-pact", "DEU AUT ITA", "Mutual defence; renewed in 1912."),
+    T("Triple Entente", "entente", "GBR FRA RUS", "Understanding between Britain, France and Russia."),
+    T("Anglo-Japanese Alliance", "alliance", "GBR JPN", "Mutual aid in East Asia."),
+    T("Treaty of London", "access", "GBR FRA DEU BEL", "Guarantee of Belgian neutrality."),
+    T("Serbian-Russian Understanding", "entente", "SRB RUS", "Russian patronage of Serbia."),
   ],
   1930: [
-    { name: "Kellogg-Briand Pact", kind: "non-aggression", parties: ["USA", "GBR", "FRA", "DEU", "USS", "JPN", "ITA"], terms: ["Renunciation of war as an instrument of national policy"] },
-    { name: "Anglo-German Naval Agreement", kind: "non-aggression", parties: ["GBR", "DEU"], terms: ["Cruiser and battleship tonnage ratio fixed at 100,000 to 46,000"] },
-    { name: "Non-Aggression Pact", kind: "non-aggression", parties: ["DEU", "USS"], terms: ["Neither party will attack the other", "Neutrality in a conflict with a third power"] },
-    { name: "Concordat", kind: "non-aggression", parties: ["ITA", "VAT"], terms: ["The Vatican recognises the Kingdom of Italy", "Article 7 of the Lateran Treaty's antecedent"] },
+    T("Locarno Treaties", "non-aggression", "DEU FRA BEL GBR ITA", "Guarantee of the Rhine frontier."),
+    T("Little Entente", "defensive-pact", "CSK ROU YUG", "Mutual defence against Hungarian revisionism."),
+    T("Franco-Polish Alliance", "alliance", "FRA POL", "Mutual defence."),
   ],
   1950: [
-    { name: "North Atlantic Treaty", kind: "defensive-pact", parties: ["USA", "GBR", "FRA", "DEU", "ITA", "CAN", "BEL", "DNK", "NLD", "LUX", "NOR", "PRT", "DNK2"], terms: ["Article 5 collective defence", "An armed attack on one is an attack on all"] },
-    { name: "Treaty of Friendship, Co-operation and Mutual Assistance", kind: "alliance", parties: ["USS", "CHN"], terms: ["Joint defence against Japan and the United States", "Soviet advisory mission in China"] },
-    { name: "European Coal and Steel Community", kind: "customs-union", parties: ["FRA", "DEU", "ITA", "BEL", "NLD", "LUX"], terms: ["Common market in coal and steel", "Six-member executive board"], tradeBonus: 6e9 },
-    { name: "Soviet-Japanese Neutrality Pact", kind: "non-aggression", parties: ["USS", "JPN"], terms: ["Non-aggression if either is attacked by a third power", "Recognition of Soviet interests in Manchuria"], tradeBonus: 8e8 },
-    { name: "Treaty of Peace with Japan", kind: "peace", parties: ["JPN", "USA", "GBR", "FRA"], terms: ["Renunciation of Japanese sovereignty over its colonies", "Allied occupation of Japan"] },
+    T("North Atlantic Treaty", "defensive-pact", "USA CAN GBR FRA ITA BEL NLD LUX DNK NOR ISL PRT", "An attack on one is an attack on all."),
+    T("Sino-Soviet Friendship Negotiations", "alliance", "USS CHN", "Mao is in Moscow negotiating the treaty of alliance."),
+    T("Comecon", "customs-union", "USS POL CSK HUN ROU BGR ALB", "Socialist economic coordination."),
   ],
   1990: [
-    { name: "Treaty on European Union", kind: "customs-union", parties: ["DEU", "FRA", "ITA", "GBR", "ESP", "POL", "NLD", "BEL", "GRC", "PRT", "DNK", "IRL", "AUT", "FIN", "SWE", "LUX"], terms: ["Single market", "Economic and monetary union"], tradeBonus: 2.4e12 },
-    { name: "START I", kind: "defensive-pact", parties: ["USA", "USS"], terms: ["Reduction of strategic offensive arms to 6,000 warheads each", "On-site inspection"], },
-    { name: "G7 Economic Partnership", kind: "trade", parties: ["USA", "GBR", "FRA", "DEU", "ITA", "JPN", "CAN"], terms: ["Trade liberalisation", "Coordination of macroeconomic policy"], tradeBonus: 1.1e12 },
-    { name: "Treaty of Friendship and Cooperation", kind: "alliance", parties: ["USA", "JPN"], terms: ["Mutual security guarantee", "The United States forward-deploys forces in Japan"], tradeBonus: 3.2e11 },
+    T("North Atlantic Treaty", "defensive-pact", "USA CAN GBR FRA DEU ITA BEL NLD LUX DNK NOR ISL PRT ESP GRC TUR", "An attack on one is an attack on all."),
+    T("Warsaw Pact", "defensive-pact", "USS POL CSK HUN ROU BGR", "Fading fast; it dissolves next year."),
+    T("European Communities", "customs-union", "BEL DNK FRA DEU GRC IRL ITA LUX NLD PRT ESP GBR", "Single market programme."),
+    T("US-Japan Security Treaty", "alliance", "USA JPN", "Mutual cooperation and security."),
+  ],
+  2010: [
+    T("North Atlantic Treaty", "defensive-pact", "USA CAN GBR FRA DEU ITA BEL NLD LUX DNK NOR ISL PRT ESP GRC TUR POL CZE HUN BGR EST LVA LTU ROU SVK SVN ALB HRV", "Collective defence."),
+    T("European Union", "customs-union", "BEL DNK FRA DEU GRC IRL ITA LUX NLD PRT ESP GBR AUT FIN SWE CYP CZE EST HUN LVA LTU MLT POL SVK SVN BGR ROU", "Single market."),
+    T("NAFTA", "trade", "USA CAN MEX", "North American free trade."),
+    T("US-Japan Security Treaty", "alliance", "USA JPN", "Mutual cooperation and security."),
+    T("US-ROK Mutual Defense Treaty", "alliance", "USA KOR", "Mutual defence."),
+  ],
+  2020: [
+    T("North Atlantic Treaty", "defensive-pact", "USA CAN GBR FRA DEU ITA BEL NLD LUX DNK NOR ISL PRT ESP GRC TUR POL CZE HUN BGR EST LVA LTU ROU SVK SVN ALB HRV MNE", "Collective defence."),
+    T("European Union", "customs-union", "BEL DNK FRA DEU GRC IRL ITA LUX NLD PRT ESP AUT FIN SWE CYP CZE EST HUN LVA LTU MLT POL SVK SVN BGR ROU HRV", "Single market."),
+    T("USMCA", "trade", "USA CAN MEX", "North American trade; enters into force in July."),
+    T("US-Japan Security Treaty", "alliance", "USA JPN", "Mutual cooperation and security."),
+    T("US-ROK Mutual Defense Treaty", "alliance", "USA KOR", "Mutual defence."),
   ],
   2026: [
-    { name: "North Atlantic Treaty", kind: "defensive-pact", parties: ["USA", "GBR", "FRA", "DEU", "ITA", "CAN", "BEL", "DNK", "NLD", "LUX", "NOR", "PRT", "POL", "ESP", "SWE", "FIN", "ROU", "SVK", "SVN", "HRV", "TUR", "ISL", "ALB", "LVA", "LTU", "MNE", "MKD", "BIH", "MDA"], terms: ["Article 5 collective defence", "Spending commitments renewed to 2% of GDP"], tradeBonus: 4.6e12 },
-    { name: "European Union", kind: "customs-union", parties: ["FRA", "DEU", "ITA", "ESP", "POL", "NLD", "BEL", "GRC", "PRT", "AUT", "SWE", "FIN", "ROU", "SVK", "SVN", "HRV", "CZE", "HUN", "DNK", "IRL", "LTU", "LVA", "EST", "CYP", "MLT"], terms: ["Single market", "Common external tariff", "Freedom of movement"], tradeBonus: 5.1e12 },
-    { name: "BRICS Partnership", kind: "trade", parties: ["CHN", "RUS", "IND", "BRA", "ZAF", "EGY", "ARE", "IRN"], terms: ["Local currency settlement", "New Development Bank capitalisation"], tradeBonus: 1.9e12 },
-    { name: "Sino-Russian Treaty of Friendship", kind: "alliance", parties: ["CHN", "RUS"], terms: ["No-NATO pledge", "Strategic partnership without a mutual defence clause"], tradeBonus: 2.4e11 },
-    { name: "ASEAN Charter", kind: "non-aggression", parties: ["SGP", "MYS", "IDN", "THA", "PHL", "VNM", "KHM", "LAO", "MMR", "BRN"], terms: ["No use of force", "Consensus decision making"], tradeBonus: 8.6e11 },
-    { name: "Gulf Cooperation Council Charter", kind: "customs-union", parties: ["SAU", "ARE", "QAT", "KWT", "BHR", "OMN"], terms: ["Common market", "Free movement of capital"], tradeBonus: 3.4e11 },
-    { name: "Treaty of Friendship and Cooperation", kind: "alliance", parties: ["USA", "JPN", "KOR", "AUS", "PHL"], terms: ["Extended deterrence in East Asia"], tradeBonus: 6.2e11 },
-    { name: "OPEC+ Production Agreement", kind: "trade", parties: ["SAU", "RUS", "IRQ", "IRN", "ARE", "KWT", "OMN", "QAT"], terms: ["Voluntary production cuts", "Compliance monitored monthly"], tradeBonus: 5.2e11 },
+    T("North Atlantic Treaty", "defensive-pact", "USA CAN GBR FRA DEU ITA BEL NLD LUX DNK NOR ISL PRT ESP GRC TUR POL CZE HUN BGR EST LVA LTU ROU SVK SVN ALB HRV MNE MKD FIN SWE", "Collective defence."),
+    T("European Union", "customs-union", "BEL DNK FRA DEU GRC IRL ITA LUX NLD PRT ESP AUT FIN SWE CYP CZE EST HUN LVA LTU MLT POL SVK SVN BGR ROU HRV", "Single market."),
+    T("USMCA", "trade", "USA CAN MEX", "North American trade."),
+    T("CSTO", "defensive-pact", "RUS BLR KAZ KGZ TJK ARM", "Collective security."),
+    T("US-Japan Security Treaty", "alliance", "USA JPN", "Mutual cooperation and security."),
+    T("US-ROK Mutual Defense Treaty", "alliance", "USA KOR", "Mutual defence."),
+    T("AUKUS", "alliance", "USA GBR AUS", "Trilateral security pact."),
+    T("Russia-North Korea Strategic Partnership", "alliance", "RUS PRK", "Mutual assistance treaty signed in 2024."),
   ],
 };

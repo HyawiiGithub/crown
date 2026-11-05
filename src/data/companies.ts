@@ -1,324 +1,319 @@
-import type { CompanySeed } from "../shared/types";
+import type { CompanySeed, SectorId } from "../shared/types";
 
 /**
- * Corporations seeded into each scenario.
- *
- * `revenue` is annual, in credits. Valuation is derived from it in the bootstrap,
- * so you only author the number you actually know. Earlier scenarios have far
- * fewer listed companies, which is correct: in 1900 there was no listed equity at
- * scale outside a handful of London houses, and in 1930 the Dow was twenty names.
+ * Real corporations by scenario. Revenue is annual, in billions of USD of the
+ * period; employees are in thousands. Figures are rounded public estimates.
+ * Row: Name|country polity|sector|revenue $B|employees k|exchange (blank = unlisted)|state share|founded
  */
-const C = (
-  name: string,
-  country: string,
-  sector: CompanySeed["sector"],
-  revenue: number,
-  employees: number,
-  opts: Partial<CompanySeed> = {},
-): CompanySeed => ({ name, country: country as CompanySeed["country"], sector, revenue, employees, listed: true, ...opts });
-
-// ===========================================================================
-// 2026 -- the listed large-cap universe
-// ===========================================================================
-
-export const COMPANIES_2026: CompanySeed[] = [
-  // ---- Technology ----
-  C("Apple Inc.", "USA", "technology", 4.0e12, 164000, { foundedYear: 1976, brandValue: 3.0e12, rd: 3.2e11, exchange: "nyse" }),
-  C("Microsoft Corporation", "USA", "technology", 2.8e12, 228000, { foundedYear: 1975, brandValue: 2.6e12, rd: 2.4e11, exchange: "nasdaq" }),
-  C("NVIDIA Corporation", "USA", "technology", 1.4e12, 36000, { foundedYear: 1993, brandValue: 2.4e12, rd: 1.1e11, exchange: "nasdaq" }),
-  C("Alphabet Inc.", "USA", "technology", 1.1e12, 190000, { foundedYear: 1998, brandValue: 1.7e12, rd: 1.4e11, exchange: "nasdaq" }),
-  C("Amazon.com, Inc.", "USA", "retail", 1.1e12, 1550000, { foundedYear: 1994, brandValue: 1.1e12, rd: 9.4e10, exchange: "nasdaq" }),
-  C("Meta Platforms, Inc.", "USA", "media", 6.2e11, 72000, { foundedYear: 2004, brandValue: 9.0e11, rd: 5.4e10, exchange: "nasdaq" }),
-  C("Broadcom Inc.", "USA", "technology", 5.5e11, 37000, { foundedYear: 1961, brandValue: 8.0e11, rd: 5.0e10, exchange: "nasdaq" }),
-  C("Tesla, Inc.", "USA", "manufacturing", 3.4e11, 125000, { foundedYear: 2003, brandValue: 6.0e11, rd: 3.6e10, exchange: "nasdaq" }),
-  C("Palantir Technologies", "USA", "technology", 9.0e10, 4200, { foundedYear: 2003, brandValue: 2.4e11, rd: 6.0e9, exchange: "nasdaq" }),
-  C("TSMC", "TWN", "technology", 1.0e12, 83000, { foundedYear: 1987, brandValue: 1.2e12, rd: 6.0e10, exchange: "twse" }),
-  C("Samsung Electronics", "KOR", "technology", 5.0e11, 270000, { foundedYear: 1969, brandValue: 4.0e11, rd: 7.0e10, exchange: "krx" }),
-  C("SK Hynix", "KOR", "technology", 1.8e11, 33000, { foundedYear: 1983, brandValue: 1.6e11, rd: 2.2e10, exchange: "krx" }),
-  C("ASML Holding", "NLD", "technology", 3.4e11, 44000, { foundedYear: 1984, brandValue: 3.6e11, rd: 4.4e10, exchange: "euronext" }),
-  C("Alibaba Group", "CHN", "retail", 8.0e11, 204000, { foundedYear: 1999, brandValue: 6.0e11, rd: 4.0e10, exchange: "hkg" }),
-  C("Tencent Holdings", "CHN", "technology", 6.6e11, 105000, { foundedYear: 1998, brandValue: 6.4e11, rd: 4.6e10, exchange: "hkg" }),
-  C("Huawei Technologies", "CHN", "technology", 4.4e11, 208000, { foundedYear: 1987, brandValue: 4.4e11, rd: 6.0e10, listed: false, stateOwnership: 0.0 }),
-  C("Sony Group", "JPN", "technology", 9.0e10, 115000, { foundedYear: 1946, brandValue: 1.0e11, rd: 1.4e10, exchange: "nikkei" }),
-  C("SoftBank Group", "JPN", "technology", 4.2e10, 5000, { foundedYear: 1981, brandValue: 6.0e10, rd: 1.0e9, exchange: "nikkei" }),
-  C("SAP SE", "DEU", "technology", 3.4e11, 110000, { foundedYear: 1972, brandValue: 2.6e11, rd: 4.4e10, exchange: "dax" }),
-  C("Siemens AG", "DEU", "manufacturing", 2.0e11, 300000, { foundedYear: 1847, brandValue: 1.1e11, rd: 1.4e10, exchange: "dax" }),
-  C("Infosys", "IND", "technology", 1.9e10, 323000, { foundedYear: 1981, brandValue: 4.0e10, rd: 1.0e9, exchange: "nse" }),
-  C("Reliance Industries", "IND", "technology", 2.4e11, 340000, { foundedYear: 1966, brandValue: 2.4e11, rd: 5.0e9, exchange: "nse" }),
-  C("ZTE Corporation", "CHN", "technology", 1.8e10, 72000, { foundedYear: 1985, brandValue: 2.0e10, rd: 3.0e9, exchange: "sse" }),
-
-  // ---- Finance ----
-  C("JPMorgan Chase & Co.", "USA", "finance", 1.5e12, 310000, { foundedYear: 1799, brandValue: 8.0e11, exchange: "nyse" }),
-  C("Bank of America", "USA", "finance", 9.6e11, 216000, { foundedYear: 1904, brandValue: 3.6e11, exchange: "nyse" }),
-  C("Goldman Sachs Group", "USA", "finance", 5.0e11, 47000, { foundedYear: 1869, brandValue: 3.2e11, exchange: "nyse" }),
-  C("HSBC Holdings", "GBR", "finance", 5.4e11, 220000, { foundedYear: 1865, brandValue: 2.4e11, exchange: "lse" }),
-  C("Barclays PLC", "GBR", "finance", 2.8e11, 95000, { foundedYear: 1690, brandValue: 9.0e10, exchange: "lse" }),
-  C("Deutsche Bank AG", "DEU", "finance", 1.3e11, 90000, { foundedYear: 1870, brandValue: 3.0e10, exchange: "dax" }),
-  C("BNP Paribas", "FRA", "finance", 1.5e11, 95000, { foundedYear: 1848, brandValue: 4.0e10, exchange: "euronext" }),
-  C("Mitsubishi UFJ", "JPN", "finance", 8.0e10, 80000, { foundedYear: 2001, brandValue: 4.0e10, exchange: "nikkei" }),
-  C("ICICI Bank", "IND", "finance", 2.0e10, 130000, { foundedYear: 1994, brandValue: 3.4e10, exchange: "nse" }),
-  C("Saudi Arabian National Bank", "SAU", "finance", 1.1e10, 50000, { foundedYear: 2000, brandValue: 2.4e10, exchange: "tadawul" }),
-  C("Emirates NBD", "ARE", "finance", 2.2e10, 31000, { foundedYear: 2007, brandValue: 4.0e10, exchange: "idx" }),
-
-  // ---- Energy ----
-  C("Saudi Aramco", "SAU", "energy", 5.2e11, 75000, { foundedYear: 1933, brandValue: 1.8e12, stateOwnership: 0.76, exchange: "tadawul" }),
-  C("Petrobras", "BRA", "energy", 2.6e11, 62000, { foundedYear: 1953, brandValue: 8.0e10, stateOwnership: 0.55, exchange: "b3" }),
-  C("Exxon Mobil", "USA", "mining", 3.4e11, 62000, { foundedYear: 1999, brandValue: 4.4e11, exchange: "nyse" }),
-  C("Chevron", "USA", "mining", 1.9e11, 45600, { foundedYear: 1879, brandValue: 3.0e11, exchange: "nyse" }),
-  C("Shell plc", "GBR", "mining", 2.1e11, 96000, { foundedYear: 1907, brandValue: 2.2e11, exchange: "lse" }),
-  C("TotalEnergies SE", "FRA", "mining", 1.6e11, 110000, { foundedYear: 1924, brandValue: 1.6e11, exchange: "euronext" }),
-  C("Gazprom", "RUS", "energy", 1.4e11, 470000, { foundedYear: 1988, brandValue: 8.0e10, stateOwnership: 0.5, exchange: "moex" }),
-  C("Rosneft", "RUS", "mining", 9.0e10, 62000, { foundedYear: 1993, brandValue: 4.0e10, stateOwnership: 0.62, exchange: "moex" }),
-  C("Saudi Aramco Trading", "SAU", "mining", 1.2e11, 4000, { foundedYear: 2006, listed: false, stateOwnership: 1 }),
-  C("ONGC", "IND", "energy", 4.4e10, 48000, { foundedYear: 1956, brandValue: 3.0e10, stateOwnership: 0.61, exchange: "nse" }),
-
-  // ---- Manufacturing / autos / defence ----
-  C("Toyota Motor", "JPN", "manufacturing", 3.2e11, 380000, { foundedYear: 1937, brandValue: 2.6e11, exchange: "nikkei" }),
-  C("Volkswagen", "DEU", "manufacturing", 2.8e11, 350000, { foundedYear: 1937, brandValue: 9.0e10, exchange: "dax" }),
-  C("Mercedes-Benz Group", "DEU", "manufacturing", 1.5e11, 175000, { foundedYear: 1926, brandValue: 8.0e10, exchange: "dax" }),
-  C("Boeing", "USA", "manufacturing", 8.0e10, 170000, { foundedYear: 1916, brandValue: 1.1e11, exchange: "nyse" }),
-  C("Airbus", "FRA", "manufacturing", 6.0e10, 130000, { foundedYear: 1970, brandValue: 8.0e10, listed: false, stateOwnership: 0.3 }),
-  C("Lockheed Martin", "USA", "defence", 7.0e10, 160000, { foundedYear: 1995, brandValue: 6.0e10, stateOwnership: 0, exchange: "nyse" }),
-  C("Raytheon Technologies", "USA", "defence", 4.4e10, 95000, { foundedYear: 1920, brandValue: 4.0e10, exchange: "nyse" }),
-  C("Rolls-Royce Holdings", "GBR", "defence", 2.0e10, 42000, { foundedYear: 1904, brandValue: 2.0e10, exchange: "lse" }),
-  C("Samsung Heavy Industries", "KOR", "defence", 1.6e10, 30000, { foundedYear: 1952, brandValue: 1.0e10, exchange: "krx" }),
-  C("BAE Systems", "GBR", "defence", 2.6e10, 86000, { foundedYear: 1999, brandValue: 2.0e10, stateOwnership: 0.23, exchange: "lse" }),
-  C("Samsung C&T", "KOR", "construction", 2.4e10, 40000, { foundedYear: 1952, exchange: "krx" }),
-
-  // ---- Healthcare / pharma ----
-  C("Johnson & Johnson", "USA", "healthcare", 8.8e10, 138000, { foundedYear: 1886, brandValue: 1.1e11, exchange: "nyse" }),
-  C("UnitedHealth Group", "USA", "healthcare", 4.0e11, 400000, { foundedYear: 1977, brandValue: 3.0e11, exchange: "nyse" }),
-  C("Pfizer", "USA", "healthcare", 5.0e10, 88000, { foundedYear: 1849, brandValue: 1.4e11, exchange: "nyse" }),
-  C("Roche", "CHE", "healthcare", 6.0e10, 94000, { foundedYear: 1896, brandValue: 1.4e11, exchange: "euronext" }),
-  C("Novartis", "CHE", "healthcare", 5.0e10, 76000, { foundedYear: 1996, brandValue: 1.0e11, exchange: "euronext" }),
-  C("Novo Nordisk", "DNK", "healthcare", 3.0e10, 23000, { foundedYear: 1923, brandValue: 1.4e11, exchange: "euronext" }),
-  C("Merck & Co.", "USA", "healthcare", 6.0e10, 68000, { foundedYear: 1891, brandValue: 1.0e11, exchange: "nyse" }),
-  C("AstraZeneca", "GBR", "healthcare", 5.0e10, 92000, { foundedYear: 1998, brandValue: 1.0e11, exchange: "lse" }),
-
-  // ---- Telecom ----
-  C("China Mobile", "CHN", "telecom", 1.1e12, 450000, { foundedYear: 2000, brandValue: 1.4e12, stateOwnership: 0.82, exchange: "sse" }),
-  C("AT&T", "USA", "telecom", 1.7e11, 160000, { foundedYear: 1985, brandValue: 1.4e11, exchange: "nyse" }),
-  C("Verizon", "USA", "telecom", 1.3e11, 105000, { foundedYear: 1983, brandValue: 1.2e11, exchange: "nyse" }),
-  C("Deutsche Telekom", "DEU", "telecom", 8.0e10, 200000, { foundedYear: 1995, brandValue: 7.0e10, stateOwnership: 0.32, exchange: "dax" }),
-  C("Orange S.A.", "FRA", "telecom", 4.4e10, 71000, { foundedYear: 1988, brandValue: 2.4e10, stateOwnership: 0.34, exchange: "euronext" }),
-  C("SoftBank Telecom", "JPN", "telecom", 1.0e11, 65000, { foundedYear: 2006, exchange: "nikkei" }),
-  C("Singtel", "SGP", "telecom", 1.8e10, 23000, { foundedYear: 1994, brandValue: 2.4e10, stateOwnership: 0.24, exchange: "sgx" }),
-
-  // ---- Consumer / retail / autos elsewhere ----
-  C("Walmart", "USA", "retail", 6.4e11, 2100000, { foundedYear: 1962, brandValue: 4.4e11, exchange: "nyse" }),
-  C("Costco", "USA", "retail", 2.4e11, 333000, { foundedYear: 1983, brandValue: 2.4e11, exchange: "nasdaq" }),
-  C("Nestle", "CHE", "retail", 9.4e10, 270000, { foundedYear: 1866, brandValue: 2.0e11, exchange: "euronext" }),
-  C("Unilever", "GBR", "retail", 5.2e10, 190000, { foundedYear: 1929, brandValue: 1.2e11, exchange: "lse" }),
-  C("Procter & Gamble", "USA", "retail", 8.0e10, 108000, { foundedYear: 1837, brandValue: 2.0e11, exchange: "nyse" }),
-  C("Toyota Tsusho", "JPN", "retail", 4.0e10, 50000, { foundedYear: 1948, exchange: "nikkei" }),
-  C("Tata Sons", "IND", "manufacturing", 2.0e11, 480000, { foundedYear: 1868, brandValue: 1.4e11, stateOwnership: 0.66, listed: false }),
-
-  // ---- Real estate / utilities / banks of the Gulf and LatAm ----
-  C("Emaar Properties", "ARE", "real-estate", 6.0e9, 12000, { foundedYear: 1997, brandValue: 1.0e10, stateOwnership: 0.85, exchange: "idx" }),
-  C("Saudi Real Estate", "SAU", "real-estate", 2.0e9, 4000, { foundedYear: 1973, stateOwnership: 0.4, listed: false }),
-  C("América Móvil", "MEX", "telecom", 4.0e10, 180000, { foundedYear: 2000, brandValue: 2.0e10, exchange: "bmv" }),
-  C("Pemex", "MEX", "energy", 6.0e10, 78000, { foundedYear: 1938, brandValue: 4.0e10, stateOwnership: 0.83, listed: false }),
-  C("Femsa", "MEX", "retail", 5.0e10, 260000, { foundedYear: 1890, brandValue: 2.0e10, exchange: "bmv" }),
-  C("Ecopetrol", "COL", "energy", 1.2e10, 6000, { foundedYear: 1948, stateOwnership: 0.73, exchange: "idx" }),
-  C("Anglo American", "GBR", "mining", 2.4e10, 90000, { foundedYear: 1911, brandValue: 1.4e10, exchange: "lse" }),
-  C("BHP", "AUS", "mining", 4.4e10, 58000, { foundedYear: 1885, brandValue: 1.0e11, exchange: "asx" }),
-  C("Rio Tinto", "AUS", "mining", 3.4e10, 54000, { foundedYear: 1873, brandValue: 4.0e10, exchange: "asx" }),
-  C("Glencore", "CHE", "mining", 1.8e11, 80000, { foundedYear: 1974, brandValue: 1.0e10, exchange: "euronext" }),
-  C("FirstRand", "ZAF", "finance", 1.0e10, 33000, { foundedYear: 1998, exchange: "jse" }),
-  C("Naspers", "ZAF", "technology", 5.0e9, 5500, { foundedYear: 1915, brandValue: 4.0e10, exchange: "jse" }),
-  C("PDVSA", "VEN", "energy", 1.0e10, 90000, { foundedYear: 1976, stateOwnership: 1, listed: false }),
-  C("Saudi Aramco Downstream", "SAU", "real-estate", 8.0e9, 2000, { foundedYear: 2013, listed: false, stateOwnership: 1 }),
-  C("Gazprombank", "RUS", "finance", 1.0e10, 240000, { foundedYear: 1990, stateOwnership: 0.5, listed: false }),
-  C("PDVSA refining", "VEN", "mining", 4.0e9, 12000, { foundedYear: 1976, stateOwnership: 1, listed: false }),
-  C("Petronas", "MYS", "energy", 5.0e10, 47000, { foundedYear: 1974, brandValue: 4.0e10, stateOwnership: 1, exchange: "idx" }),
-  C("Yodogawa Steel", "JPN", "manufacturing", 1.6e10, 38000, { foundedYear: 1798, exchange: "nikkei" }),
-  C("Bank of China", "CHN", "finance", 8.0e10, 180000, { foundedYear: 1912, stateOwnership: 0.5, exchange: "hkg" }),
-  C("ICBC", "CHN", "finance", 6.0e10, 420000, { foundedYear: 1984, stateOwnership: 0.7, exchange: "sse" }),
-];
-
-// ===========================================================================
-// 2010 -- pre-smartphone-peak, financial crisis aftermath
-// ===========================================================================
-
-export const COMPANIES_2010: CompanySeed[] = [
-  C("Exxon Mobil", "USA", "mining", 3.6e11, 62000, { foundedYear: 1999, brandValue: 2.4e11, exchange: "nyse" }),
-  C("Saudi Aramco", "SAU", "energy", 5.4e11, 80000, { foundedYear: 1933, brandValue: 8.0e11, stateOwnership: 0.8, exchange: "tadawul" }),
-  C("Royal Dutch Shell", "GBR", "mining", 2.3e11, 96000, { foundedYear: 1907, brandValue: 1.4e11, exchange: "lse" }),
-  C("Petrobras", "BRA", "mining", 2.4e11, 57000, { foundedYear: 1953, stateOwnership: 0.5, exchange: "b3" }),
-  C("Walmart", "USA", "retail", 4.2e11, 2100000, { foundedYear: 1962, brandValue: 2.0e11, exchange: "nyse" }),
-  C("Toyota", "JPN", "manufacturing", 1.9e11, 316000, { foundedYear: 1937, brandValue: 1.2e11, exchange: "nikkei" }),
-  C("Chevron", "USA", "mining", 1.8e11, 40000, { foundedYear: 1879, brandValue: 1.4e11, exchange: "nyse" }),
-  C("Volkswagen", "DEU", "manufacturing", 2.2e11, 300000, { foundedYear: 1937, brandValue: 4.0e10, exchange: "dax" }),
-  C("Pfizer", "USA", "healthcare", 4.4e10, 88000, { foundedYear: 1849, brandValue: 5.0e10, exchange: "nyse" }),
-  C("Johnson & Johnson", "USA", "healthcare", 7.2e10, 124000, { foundedYear: 1886, brandValue: 8.0e10, exchange: "nyse" }),
-  C("Nokia", "FIN", "telecom", 4.0e10, 130000, { foundedYear: 1865, brandValue: 2.0e10, exchange: "euronext" }),
-  C("Ericsson", "SWE", "telecom", 2.0e10, 80000, { foundedYear: 1876, brandValue: 1.4e10, exchange: "idx" }),
-  C("Microsoft", "USA", "technology", 6.2e10, 94000, { foundedYear: 1975, brandValue: 1.6e11, exchange: "nasdaq" }),
-  C("Apple", "USA", "technology", 1.6e11, 73000, { foundedYear: 1976, brandValue: 1.4e11, exchange: "nasdaq" }),
-  C("Google", "USA", "technology", 2.9e10, 24000, { foundedYear: 1998, brandValue: 1.0e11, exchange: "nasdaq" }),
-  C("Cisco", "USA", "technology", 4.0e10, 75000, { foundedYear: 1984, brandValue: 8.0e10, exchange: "nasdaq" }),
-  C("Intel", "USA", "technology", 5.3e10, 72000, { foundedYear: 1968, brandValue: 8.0e10, exchange: "nasdaq" }),
-  C("TSMC", "TWN", "technology", 2.7e10, 39000, { foundedYear: 1987, brandValue: 2.0e10, exchange: "twse" }),
-  C("Samsung Electronics", "KOR", "technology", 1.4e11, 212000, { foundedYear: 1969, brandValue: 4.0e10, exchange: "krx" }),
-  C("Sony", "JPN", "technology", 7.0e10, 103000, { foundedYear: 1946, brandValue: 4.0e10, exchange: "nikkei" }),
-  C("Toyota Tsusho", "JPN", "retail", 4.0e10, 50000, { foundedYear: 1948, exchange: "nikkei" }),
-  C("Petronas", "MYS", "energy", 6.0e10, 47000, { foundedYear: 1974, stateOwnership: 1, exchange: "idx" }),
-  C("Saudi Al-Qahtani Group", "SAU", "mining", 8.0e10, 50000, { foundedYear: 2000, listed: false, stateOwnership: 0.8 }),
-  C("Saudi Aramco Shipping", "SAU", "transport", 4.0e10, 12000, { foundedYear: 2002, listed: false, stateOwnership: 1 }),
-  C("Saudi Aramco Aviation", "SAU", "transport", 2.0e10, 6000, { foundedYear: 2008, listed: false, stateOwnership: 1 }),
-  C("Petrobras Distribuidora", "BRA", "retail", 4.0e10, 60000, { foundedYear: 1997, stateOwnership: 0.6, listed: false }),
-  C("Banco do Brasil", "BRA", "finance", 6.0e10, 250000, { foundedYear: 1808, stateOwnership: 0.6, exchange: "b3" }),
-  C("América Móvil", "MEX", "telecom", 2.4e10, 175000, { foundedYear: 2000, exchange: "bmv" }),
-  C("Pemex refining", "MEX", "energy", 4.0e10, 30000, { foundedYear: 1965, stateOwnership: 1, listed: false }),
-  C("Infosys", "IND", "technology", 6.0e9, 130000, { foundedYear: 1981, exchange: "nse" }),
-  C("Tata Motors", "IND", "manufacturing", 1.4e10, 250000, { foundedYear: 1945, stateOwnership: 0.34, exchange: "nse" }),
-  C("Reliance Industries", "IND", "manufacturing", 4.0e10, 130000, { foundedYear: 1966, stateOwnership: 0.5, exchange: "nse" }),
-  C("Gazprom", "RUS", "energy", 1.3e11, 400000, { foundedYear: 1988, stateOwnership: 0.5, exchange: "moex" }),
-  C("BP", "GBR", "mining", 3.0e11, 80000, { foundedYear: 1909, brandValue: 1.0e11, exchange: "lse" }),
-  C("Siemens", "DEU", "manufacturing", 8.0e10, 300000, { foundedYear: 1847, exchange: "dax" }),
-  C("Airbus", "FRA", "manufacturing", 3.0e10, 100000, { foundedYear: 1970, stateOwnership: 0.3, listed: false }),
-  C("Sony Pictures", "JPN", "media", 8.0e9, 33000, { foundedYear: 1989, exchange: "nikkei" }),
-];
-
-// ===========================================================================
-// 1990 -- pre-internet, just off the end of the Cold War
-// ===========================================================================
-
-export const COMPANIES_1990: CompanySeed[] = [
-  C("Exxon Corporation", "USA", "mining", 1.6e11, 75000, { foundedYear: 1870, brandValue: 6.0e10, exchange: "nyse" }),
-  C("Saudi Aramco", "SAU", "energy", 1.0e11, 70000, { foundedYear: 1933, stateOwnership: 1, listed: false }),
-  C("Royal Dutch Shell", "GBR", "mining", 1.4e11, 85000, { foundedYear: 1907, brandValue: 6.0e10, exchange: "lse" }),
-  C("IBM", "USA", "technology", 6.0e10, 350000, { foundedYear: 1911, brandValue: 5.0e10, exchange: "nyse" }),
-  C("General Motors", "USA", "manufacturing", 1.3e11, 300000, { foundedYear: 1908, brandValue: 2.0e10, exchange: "nyse" }),
-  C("Toyota", "JPN", "manufacturing", 6.0e10, 200000, { foundedYear: 1937, exchange: "nikkei" }),
-  C("Sony", "JPN", "technology", 3.0e10, 80000, { foundedYear: 1946, exchange: "nikkei" }),
-  C("Mitsubishi Corporation", "JPN", "retail", 2.0e10, 60000, { foundedYear: 1954, exchange: "nikkei" }),
-  C("British Petroleum", "GBR", "mining", 1.6e11, 70000, { foundedYear: 1909, exchange: "lse" }),
-  C("Shell UK", "GBR", "mining", 3.0e10, 60000, { foundedYear: 1907, exchange: "lse" }),
-  C("Unilever", "GBR", "retail", 2.4e10, 130000, { foundedYear: 1929, exchange: "lse" }),
-  C("Nestle", "CHE", "retail", 2.4e10, 130000, { foundedYear: 1866, brandValue: 4.0e10, exchange: "euronext" }),
-  C("Volkswagen", "DEU", "manufacturing", 5.0e10, 250000, { foundedYear: 1937, exchange: "dax" }),
-  C("Siemens", "DEU", "manufacturing", 3.0e10, 300000, { foundedYear: 1847, exchange: "dax" }),
-  C("Daimler-Benz", "DEU", "manufacturing", 4.0e10, 180000, { foundedYear: 1926, exchange: "dax" }),
-  C("Total", "FRA", "mining", 3.0e10, 70000, { foundedYear: 1924, exchange: "euronext" }),
-  C("ELF Aquitaine", "FRA", "mining", 3.0e10, 80000, { foundedYear: 1949, exchange: "euronext" }),
-  C("Petrobras", "BRA", "mining", 1.4e11, 50000, { foundedYear: 1953, stateOwnership: 1, listed: false }),
-  C("Tata Group", "IND", "manufacturing", 4.0e9, 200000, { foundedYear: 1868, stateOwnership: 0.5, listed: false }),
-  C("Reliance Industries", "IND", "manufacturing", 1.4e10, 60000, { foundedYear: 1966, stateOwnership: 0.4, exchange: "nse" }),
-  C("Gazprom", "USS", "energy", 8.0e10, 300000, { foundedYear: 1988, stateOwnership: 1, listed: false }),
-  C("BP", "GBR", "mining", 6.0e10, 70000, { foundedYear: 1909, exchange: "lse" }),
-  C("Pfizer", "USA", "healthcare", 1.0e10, 40000, { foundedYear: 1849, exchange: "nyse" }),
-  C("Johnson & Johnson", "USA", "healthcare", 1.4e10, 40000, { foundedYear: 1886, exchange: "nyse" }),
-  C("Sears", "USA", "retail", 2.4e10, 400000, { foundedYear: 1892, exchange: "nyse" }),
-  C("Samsung", "KOR", "technology", 3.0e10, 58000, { foundedYear: 1969, exchange: "krx" }),
-  C("Matsushita", "JPN", "manufacturing", 1.0e10, 120000, { foundedYear: 1918, exchange: "nikkei" }),
-  C("Thyssen", "DEU", "manufacturing", 2.4e10, 180000, { foundedYear: 1900, exchange: "dax" }),
-  C("British Steel", "GBR", "manufacturing", 8.0e9, 70000, { foundedYear: 1928, exchange: "lse" }),
-];
-
-// ===========================================================================
-// 1950 -- reconstruction begins
-// ===========================================================================
-
-export const COMPANIES_1950: CompanySeed[] = [
-  C("Standard Oil of New Jersey", "USA", "mining", 2.0e10, 50000, { foundedYear: 1882, brandValue: 2.0e10, exchange: "nyse" }),
-  C("Gulf Oil", "USA", "mining", 1.4e10, 40000, { foundedYear: 1901, exchange: "nyse" }),
-  C("British Petroleum", "GBR", "mining", 1.4e10, 40000, { foundedYear: 1909, exchange: "lse" }),
-  C("Anglo-Persian Oil", "GBR", "mining", 1.4e10, 35000, { foundedYear: 1909, exchange: "lse" }),
-  C("Royal Dutch Shell", "GBR", "mining", 1.0e10, 45000, { foundedYear: 1907, exchange: "lse" }),
-  C("Saudi Aramco", "SAU", "energy", 4.0e9, 12000, { foundedYear: 1933, stateOwnership: 1, listed: false }),
-  C("Socony-Vacuum", "USA", "mining", 8.0e9, 35000, { foundedYear: 1870, exchange: "nyse" }),
-  C("General Motors", "USA", "manufacturing", 7.0e10, 340000, { foundedYear: 1908, exchange: "nyse" }),
-  C("Ford Motor", "USA", "manufacturing", 5.0e10, 180000, { foundedYear: 1903, exchange: "nyse" }),
-  C("General Electric", "USA", "manufacturing", 2.0e10, 340000, { foundedYear: 1892, exchange: "nyse" }),
-  C("DuPont", "USA", "manufacturing", 9.0e9, 73000, { foundedYear: 1802, exchange: "nyse" }),
-  C("Unilever", "GBR", "retail", 1.0e10, 200000, { foundedYear: 1929, exchange: "lse" }),
-  C("Imperial Chemical Industries", "GBR", "manufacturing", 9.0e9, 150000, { foundedYear: 1926, exchange: "lse" }),
-  C("Anglo Steel", "GBR", "manufacturing", 4.0e9, 120000, { foundedYear: 1928, exchange: "lse" }),
-  C("Siemens", "DEU", "manufacturing", 4.0e9, 220000, { foundedYear: 1847, exchange: "dax" }),
-  C("AEG", "DEU", "manufacturing", 3.0e9, 170000, { foundedYear: 1883, exchange: "dax" }),
-  C("Volkswagen", "DEU", "manufacturing", 4.0e9, 23000, { foundedYear: 1937, listed: false, stateOwnership: 0.6 }),
-  C("Toyota", "JPN", "manufacturing", 3.0e9, 20000, { foundedYear: 1937, exchange: "nikkei" }),
-  C("Hitachi", "JPN", "manufacturing", 3.0e9, 140000, { foundedYear: 1910, exchange: "nikkei" }),
-  C("Nissan Motor", "JPN", "manufacturing", 2.0e9, 30000, { foundedYear: 1933, exchange: "nikkei" }),
-  C("Samsung", "KOR", "manufacturing", 4.0e8, 12000, { foundedYear: 1938, stateOwnership: 0.4, exchange: "krx" }),
-  C("Petrobras", "BRA", "mining", 4.0e9, 20000, { foundedYear: 1953, stateOwnership: 1, listed: false }),
-  C("Tata Steel", "IND", "manufacturing", 1.0e9, 80000, { foundedYear: 1912, stateOwnership: 0.4, listed: false }),
-  C("Bata", "CZE", "retail", 6.0e8, 60000, { foundedYear: 1894, listed: false }),
-  C("Boeing", "USA", "manufacturing", 4.0e8, 15000, { foundedYear: 1916, listed: false }),
-  C("Hindustan Aeronautics", "IND", "defence", 2.0e8, 30000, { foundedYear: 1940, stateOwnership: 1, listed: false }),
-  C("Yuzhuralmash", "USS", "manufacturing", 4.0e9, 90000, { foundedYear: 1936, stateOwnership: 1, listed: false }),
-];
-
-// ===========================================================================
-// 1930 -- listed equity is twenty Dow names and a thin London market
-// ===========================================================================
-
-export const COMPANIES_1930: CompanySeed[] = [
-  C("General Motors", "USA", "manufacturing", 1.0e9, 49000, { foundedYear: 1908, exchange: "nyse" }),
-  C("Standard Oil of New Jersey", "USA", "mining", 8.0e8, 25000, { foundedYear: 1882, exchange: "nyse" }),
-  C("Atchison, Topeka and Santa Fe", "USA", "transport", 3.0e8, 38000, { foundedYear: 1859, exchange: "nyse" }),
-  C("American Telephone and Telegraph", "USA", "telecom", 3.0e8, 200000, { foundedYear: 1885, exchange: "nyse" }),
-  C("DuPont", "USA", "manufacturing", 2.0e8, 40000, { foundedYear: 1802, exchange: "nyse" }),
-  C("Sears Roebuck", "USA", "retail", 3.0e8, 60000, { foundedYear: 1892, exchange: "nyse" }),
-  C("Pennsylvania Railroad", "USA", "transport", 3.0e8, 180000, { foundedYear: 1846, exchange: "nyse" }),
-  C("New York Central Railroad", "USA", "transport", 3.0e8, 140000, { foundedYear: 1853, exchange: "nyse" }),
-  C("International Harvester", "USA", "manufacturing", 2.0e8, 80000, { foundedYear: 1902, exchange: "nyse" }),
-  C("Radio Corporation of America", "USA", "telecom", 1.0e8, 12000, { foundedYear: 1919, exchange: "nyse" }),
-  C("Anglo-Persian Oil", "GBR", "mining", 1.0e8, 20000, { foundedYear: 1909, exchange: "lse" }),
-  C("Shell-Mex & BP", "GBR", "mining", 1.0e8, 25000, { foundedYear: 1912, exchange: "lse" }),
-  C("Imperial Chemical Industries", "GBR", "manufacturing", 1.4e8, 50000, { foundedYear: 1926, exchange: "lse" }),
-  C("Unilever", "GBR", "retail", 1.4e8, 90000, { foundedYear: 1929, exchange: "lse" }),
-  C("Courtaulds", "GBR", "manufacturing", 6.0e7, 45000, { foundedYear: 1816, exchange: "lse" }),
-  C("British Dyestuffs Corporation", "GBR", "manufacturing", 4.0e7, 25000, { foundedYear: 1919, exchange: "lse" }),
-  C("AEG", "DEU", "manufacturing", 1.2e8, 120000, { foundedYear: 1883, listed: false, stateOwnership: 0.4 }),
-  C("Siemens", "DEU", "manufacturing", 1.4e8, 200000, { foundedYear: 1847, exchange: "lse" }),
-  C("Thyssen", "DEU", "manufacturing", 1.0e8, 150000, { foundedYear: 1900, listed: false }),
-  C("Heinkel", "DEU", "manufacturing", 3.0e7, 12000, { foundedYear: 1911, listed: false, stateOwnership: 0.2 }),
-  C("Fiat", "ITA", "manufacturing", 1.0e8, 70000, { foundedYear: 1899, listed: false, stateOwnership: 0.4 }),
-  C("Toyota", "JPN", "manufacturing", 2.0e7, 8000, { foundedYear: 1937, listed: false, stateOwnership: 0.3 }),
-  C("Mitsubishi", "JPN", "mining", 1.0e8, 70000, { foundedYear: 1870, exchange: "nikkei" }),
-  C("Yugoslav Railways", "YUG", "transport", 3.0e7, 60000, { foundedYear: 1852, listed: false, stateOwnership: 1 }),
-  C("Gapon Textiles", "USS", "manufacturing", 4.0e7, 30000, { foundedYear: 1843, listed: false, stateOwnership: 1 }),
-];
-
-/** Minimal scattered equity markets in 1900: canals, mills, banks. */
-export const COMPANIES_1900: CompanySeed[] = [
-  C("Bank of England", "GBR", "finance", 1.2e7, 3000, { foundedYear: 1694, listed: false, stateOwnership: 1 }),
-  C("Barings Bank", "GBR", "finance", 8.0e6, 1200, { foundedYear: 1762, listed: false }),
-  C("Rothschild & Sons", "GBR", "finance", 6.0e6, 900, { foundedYear: 1798, listed: false }),
-  C("Lloyd's of London", "GBR", "finance", 5.0e6, 2000, { foundedYear: 1688, listed: false }),
-  C("Grand Trunk Railway of Canada", "CAN", "transport", 1.0e7, 9000, { foundedYear: 1853, listed: false }),
-  C("Pennsylvania Railroad", "USA", "transport", 2.4e7, 72000, { foundedYear: 1846, listed: false }),
-  C("Cleveland, Cincinnati, Chicago and St. Louis Railway", "USA", "transport", 1.4e7, 48000, { foundedYear: 1889, listed: false }),
-  C("American Bell Telephone", "USA", "telecom", 6.0e6, 15000, { foundedYear: 1877, listed: false }),
-  C("Westinghouse Electric", "USA", "manufacturing", 8.0e6, 22000, { foundedYear: 1886, listed: false }),
-  C("Lombard Trust", "USA", "finance", 4.0e6, 800, { foundedYear: 1894, listed: false }),
-  C("Deutsche Bank", "DEU", "finance", 8.0e6, 3000, { foundedYear: 1870, listed: false }),
-  C("Banque de France", "FRA", "finance", 6.0e6, 2500, { foundedYear: 1800, listed: false, stateOwnership: 1 }),
-  C("Suez Canal Company", "EGY", "transport", 9.0e6, 9000, { foundedYear: 1858, listed: false, stateOwnership: 0.53 }),
-  C("Standard Oil", "USA", "mining", 2.4e7, 12000, { foundedYear: 1870, listed: false }),
-  C("Pennsylvania Coal", "USA", "mining", 1.0e7, 20000, { foundedYear: 1863, listed: false }),
-  C("Carnegie Steel", "USA", "manufacturing", 1.6e7, 30000, { foundedYear: 1892, listed: false }),
-  C("Mitsubishi Shipbuilding", "JPN", "manufacturing", 6.0e6, 30000, { foundedYear: 1857, listed: false, stateOwnership: 0.35 }),
-  C("Compagnie de Suez", "FRA", "mining", 8.0e6, 4000, { foundedYear: 1858, listed: false }),
-  C("Manchester Ship Canal Company", "GBR", "transport", 4.0e6, 5000, { foundedYear: 1887, listed: false }),
-  C("Chemin de fer du Nord", "FRA", "transport", 6.0e6, 25000, { foundedYear: 1845, listed: false }),
-  C("Tata Iron and Steel", "IND", "manufacturing", 4.0e6, 24000, { foundedYear: 1907, listed: false }),
-];
-
-export const COMPANIES_BY_YEAR: Record<number, CompanySeed[]> = {
-  1900: COMPANIES_1900,
-  1930: COMPANIES_1930,
-  1950: COMPANIES_1950,
-  1990: COMPANIES_1990,
-  2010: COMPANIES_2010,
-  2026: COMPANIES_2026,
+const S: Record<string, SectorId> = {
+  T: "technology", F: "finance", E: "energy", M: "manufacturing", R: "retail", H: "healthcare", N: "mining", K: "transport", D: "defence", C: "telecom", A: "media", B: "construction", G: "agriculture", U: "utilities",
 };
 
+function rows(raw: string): CompanySeed[] {
+  return raw.trim().split("\n").filter((l) => l.trim()).map((l) => {
+    const f = l.split("|").map((x) => x.trim());
+    return {
+      name: f[0],
+      country: f[1] as CompanySeed["country"],
+      sector: S[f[2]],
+      revenue: Number(f[3]) * 1e9,
+      employees: Math.round(Number(f[4]) * 1000),
+      listed: Boolean(f[5]),
+      exchange: f[5] || undefined,
+      stateOwnership: f[6] ? Number(f[6]) : 0,
+      foundedYear: f[7] ? Number(f[7]) : undefined,
+    };
+  });
+}
+
+const C1900 = rows(`
+Standard Oil|USA|E|0.14|60|nyse||1870
+Carnegie Steel|USA|M|0.1|20|||1892
+American Sugar Refining|USA|G|0.09|6|nyse||1891
+Pennsylvania Railroad|USA|K|0.14|110|nyse||1846
+New York Central Railroad|USA|K|0.1|75|nyse||1853
+Western Union|USA|C|0.03|25|nyse||1851
+J.P. Morgan & Co.|USA|F|0.02|1|||1871
+London and North Western Railway|GBR|K|0.07|70|lse||1846
+P&O Steam Navigation|GBR|K|0.02|15|lse||1837
+Imperial Tobacco|GBR|M|0.05|12|lse||1901
+Vickers Sons and Maxim|GBR|D|0.02|12|lse||1828
+HSBC|GBR|F|0.01|2|lse||1865
+Krupp|DEU|D|0.05|45|||1811
+Siemens & Halske|DEU|M|0.03|14|dax||1847
+AEG|DEU|M|0.03|17|dax||1883
+Deutsche Bank|DEU|F|0.02|3|dax||1870
+BASF|DEU|M|0.02|7|dax||1865
+Credit Lyonnais|FRA|F|0.03|5|euronext||1863
+Schneider-Creusot|FRA|D|0.03|12|euronext||1836
+Nobel Brothers Petroleum|RUS|E|0.03|12|||1879
+Mitsubishi|JPN|K|0.02|15|||1870
+Mitsui|JPN|F|0.02|10|||1876
+`);
+
+const C1914 = rows(`
+U.S. Steel|USA|M|0.56|180|nyse||1901
+Standard Oil of New Jersey|USA|E|0.28|35|nyse||1882
+Ford Motor Company|USA|M|0.12|14|||1903
+General Electric|USA|M|0.09|35|nyse||1892
+Pennsylvania Railroad|USA|K|0.3|200|nyse||1846
+AT&T|USA|C|0.23|130|nyse||1885
+International Harvester|USA|M|0.15|40|nyse||1902
+J.P. Morgan & Co.|USA|F|0.04|1|||1871
+Royal Dutch Shell|GBR|E|0.12|30|lse||1907
+Vickers|GBR|D|0.04|25|lse||1828
+Imperial Tobacco|GBR|M|0.08|20|lse||1901
+Lloyds Bank|GBR|F|0.03|8|lse||1765
+Krupp|DEU|D|0.14|82|||1811
+Siemens|DEU|M|0.08|80|dax||1847
+AEG|DEU|M|0.06|66|dax||1883
+BASF|DEU|M|0.05|11|dax||1865
+Deutsche Bank|DEU|F|0.04|6|dax||1870
+Schneider-Creusot|FRA|D|0.06|20|euronext||1836
+Renault|FRA|M|0.02|6|||1899
+Skoda Works|AUT|D|0.03|10|||1859
+Putilov Works|RUS|D|0.02|13|||1868
+Mitsubishi|JPN|K|0.04|30|||1870
+Anglo-Persian Oil|IRN|E|0.01|3|lse|0.51|1909
+`);
+
+const C1930 = rows(`
+General Motors|USA|M|1.5|190|nyse||1908
+U.S. Steel|USA|M|1.1|220|nyse||1901
+Ford Motor Company|USA|M|1.1|120|||1903
+Standard Oil of New Jersey|USA|E|1.5|65|nyse||1882
+AT&T|USA|C|1.1|390|nyse||1885
+General Electric|USA|M|0.38|78|nyse||1892
+Woolworth|USA|R|0.3|50|nyse||1879
+Chase National Bank|USA|F|0.2|8|nyse||1877
+Radio Corporation of America|USA|A|0.14|12|nyse||1919
+Royal Dutch Shell|GBR|E|0.8|110|lse||1907
+Imperial Chemical Industries|GBR|M|0.2|50|lse||1926
+Unilever|GBR|G|0.4|80|lse||1929
+Anglo-Persian Oil|GBR|E|0.25|40|lse|0.51|1909
+IG Farben|DEU|M|0.33|110|dax||1925
+Siemens|DEU|M|0.2|130|dax||1847
+Vereinigte Stahlwerke|DEU|M|0.3|150|dax||1926
+Krupp|DEU|D|0.12|60|||1811
+Citroen|FRA|M|0.1|30|euronext||1919
+Renault|FRA|M|0.1|35|||1899
+Fiat|ITA|M|0.08|37|||1899
+Mitsubishi|JPN|K|0.3|70|||1870
+Mitsui|JPN|F|0.3|60|||1876
+Philips|NLD|M|0.05|20|euronext||1891
+Volkswagen Precursor Opel|DEU|M|0.05|12|||1862
+`);
+
+const C1950 = rows(`
+General Motors|USA|M|7.5|500|nyse||1908
+Standard Oil of New Jersey|USA|E|3.2|120|nyse||1882
+U.S. Steel|USA|M|3|290|nyse||1901
+Ford Motor Company|USA|M|3.7|160|||1903
+General Electric|USA|M|2.2|190|nyse||1892
+AT&T|USA|C|3.3|600|nyse||1885
+DuPont|USA|M|1.5|87|nyse||1802
+Boeing|USA|D|0.3|30|nyse||1916
+Bank of America|USA|F|0.3|20|nyse||1904
+Royal Dutch Shell|GBR|E|2.8|180|lse||1907
+Anglo-Iranian Oil|GBR|E|1.1|80|lse|0.51|1909
+Imperial Chemical Industries|GBR|M|0.7|110|lse||1926
+Unilever|GBR|G|1.7|250|lse||1929
+British Railways|GBR|K|1|600|||1948
+Renault|FRA|M|0.25|50||1|1899
+Fiat|ITA|M|0.3|70|||1899
+Siemens|DEU|M|0.3|120|dax||1847
+Volkswagen|DEU|M|0.1|15||0.6|1937
+Toyota|JPN|M|0.03|7|||1937
+Mitsubishi Heavy Industries|JPN|M|0.1|25|nikkei||1884
+Gazprom Precursor Glavneftegaz|USS|E|2|200||1|1943
+Uralmash|USS|M|1|60||1|1933
+Saudi Aramco|SAU|E|0.5|20|||1933
+`);
+
+const C1990 = rows(`
+General Motors|USA|M|125|760|nyse||1908
+Ford Motor Company|USA|M|97|370|nyse||1903
+Exxon|USA|E|105|104|nyse||1882
+IBM|USA|T|69|374|nyse||1911
+General Electric|USA|M|58|298|nyse||1892
+Mobil|USA|E|58|67|nyse||1882
+Philip Morris|USA|G|51|168|nyse||1847
+AT&T|USA|C|37|274|nyse||1885
+Citicorp|USA|F|38|95|nyse||1812
+Walmart|USA|R|33|328|nyse||1962
+Microsoft|USA|T|1.2|5.6|nasdaq||1975
+Boeing|USA|D|28|160|nyse||1916
+Royal Dutch Shell|GBR|E|107|137|lse||1907
+BP|GBR|E|59|118|lse||1909
+Unilever|GBR|G|40|304|lse||1929
+Daimler-Benz|DEU|M|55|376|dax||1926
+Volkswagen|DEU|M|43|268|dax|0.2|1937
+Siemens|DEU|M|39|373|dax||1847
+Deutsche Bank|DEU|F|25|68|dax||1870
+Toyota|JPN|M|60|96|nikkei||1937
+Hitachi|JPN|T|50|290|nikkei||1910
+Matsushita Electric|JPN|T|44|198|nikkei||1918
+Nippon Telegraph and Telephone|JPN|C|43|266|nikkei|0.65|1952
+Elf Aquitaine|FRA|E|32|90|euronext|0.56|1976
+Fiat|ITA|M|47|304|||1899
+Samsung|KOR|T|36|180|krx||1938
+Saudi Aramco|SAU|E|40|43||1|1933
+Sinopec Precursor|CHN|E|15|500||1|1983
+`);
+
+const C2010 = rows(`
+Walmart|USA|R|408|2100|nyse||1962
+ExxonMobil|USA|E|285|103|nyse||1882
+Chevron|USA|E|164|62|nyse||1879
+General Electric|USA|M|157|304|nyse||1892
+Bank of America|USA|F|150|284|nyse||1904
+JPMorgan Chase|USA|F|116|222|nyse||1799
+Apple|USA|T|43|35|nasdaq||1976
+Microsoft|USA|T|58|89|nasdaq||1975
+Google|USA|T|24|20|nasdaq||1998
+IBM|USA|T|95|400|nyse||1911
+General Motors|USA|M|105|217|||1908
+Boeing|USA|D|68|157|nyse||1916
+Pfizer|USA|H|50|116|nyse||1849
+Royal Dutch Shell|GBR|E|285|101|lse||1907
+BP|GBR|E|246|80|lse||1909
+HSBC|GBR|F|104|303|lse||1865
+Volkswagen|DEU|M|146|369|dax|0.2|1937
+Siemens|DEU|M|104|405|dax||1847
+Deutsche Bank|DEU|F|55|82|dax||1870
+Total|FRA|E|156|97|euronext||1924
+BNP Paribas|FRA|F|130|190|euronext||1848
+Toyota|JPN|M|204|320|nikkei||1937
+Sony|JPN|T|78|168|nikkei||1946
+Samsung Electronics|KOR|T|119|190|krx||1969
+Sinopec|CHN|E|188|640|sse|0.75|2000
+PetroChina|CHN|E|157|540|sse|0.86|1999
+State Grid|CHN|U|184|1500||1|2002
+ICBC|CHN|F|71|390|sse|0.7|1984
+Gazprom|RUS|E|94|393|moex|0.5|1989
+Petrobras|BRA|E|92|77|b3|0.5|1953
+Saudi Aramco|SAU|E|200|55||1|1933
+Reliance Industries|IND|E|44|25|nse||1966
+Tata Motors|IND|M|20|50|nse||1945
+Nestle|CHE|G|108|278|||1866
+BHP Billiton|AUS|N|53|40|asx||1885
+`);
+
+const C2020 = rows(`
+Walmart|USA|R|524|2200|nyse||1962
+Amazon|USA|R|281|840|nasdaq||1994
+Apple|USA|T|260|137|nasdaq||1976
+ExxonMobil|USA|E|265|75|nyse||1882
+Microsoft|USA|T|126|144|nasdaq||1975
+Alphabet|USA|T|162|119|nasdaq||1998
+Facebook|USA|A|71|45|nasdaq||2004
+JPMorgan Chase|USA|F|142|257|nyse||1799
+UnitedHealth Group|USA|H|242|325|nyse||1977
+Johnson & Johnson|USA|H|82|132|nyse||1886
+Pfizer|USA|H|52|88|nyse||1849
+Boeing|USA|D|77|161|nyse||1916
+Tesla|USA|M|25|48|nasdaq||2003
+NVIDIA|USA|T|11|13|nasdaq||1993
+Royal Dutch Shell|GBR|E|352|83|lse||1907
+HSBC|GBR|F|71|235|lse||1865
+AstraZeneca|GBR|H|24|70|lse||1999
+Volkswagen|DEU|M|282|671|dax|0.2|1937
+Siemens|DEU|M|97|385|dax||1847
+SAP|DEU|T|31|100|dax||1972
+Total|FRA|E|176|107|euronext||1924
+LVMH|FRA|R|60|163|euronext||1987
+Toyota|JPN|M|275|370|nikkei||1937
+Sony|JPN|T|76|114|nikkei||1946
+Samsung Electronics|KOR|T|197|287|krx||1969
+TSMC|TWN|T|35|51|twse||1987
+Alibaba|CHN|R|72|117|hkg||1999
+Tencent|CHN|T|54|63|hkg||1998
+Huawei|CHN|T|123|194|||1987
+State Grid|CHN|U|387|907||1|2002
+Sinopec|CHN|E|407|582|sse|0.68|2000
+ICBC|CHN|F|177|445|sse|0.7|1984
+Gazprom|RUS|E|118|473|moex|0.5|1989
+Saudi Aramco|SAU|E|330|76|tadawul|0.98|1933
+Reliance Industries|IND|E|86|195|nse||1966
+Petrobras|BRA|E|76|57|b3|0.5|1953
+Nestle|CHE|G|94|291|||1866
+BHP|AUS|N|44|40|asx||1885
+`);
+
+const C2026 = rows(`
+Walmart|USA|R|690|2100|nasdaq||1962
+Amazon|USA|R|700|1550|nasdaq||1994
+Apple|USA|T|420|164|nasdaq||1976
+Microsoft|USA|T|300|228|nasdaq||1975
+Alphabet|USA|T|390|185|nasdaq||1998
+NVIDIA|USA|T|200|36|nasdaq||1993
+Meta Platforms|USA|A|190|76|nasdaq||2004
+Broadcom|USA|T|65|37|nasdaq||1961
+Tesla|USA|M|95|125|nasdaq||2003
+Oracle|USA|T|60|160|nyse||1977
+ExxonMobil|USA|E|340|61|nyse||1882
+Chevron|USA|E|195|45|nyse||1879
+JPMorgan Chase|USA|F|280|317|nyse||1799
+Bank of America|USA|F|190|213|nyse||1904
+Goldman Sachs|USA|F|125|46|nyse||1869
+Berkshire Hathaway|USA|F|370|392|nyse||1839
+UnitedHealth Group|USA|H|440|400|nyse||1977
+Eli Lilly|USA|H|60|47|nyse||1876
+Johnson & Johnson|USA|H|92|138|nyse||1886
+Boeing|USA|D|85|170|nyse||1916
+Lockheed Martin|USA|D|73|121|nyse||1995
+Palantir|USA|T|4|4|nasdaq||2003
+Shell|GBR|E|285|96|lse||1907
+HSBC|GBR|F|135|211|lse||1865
+AstraZeneca|GBR|H|58|94|lse||1999
+BAE Systems|GBR|D|37|107|lse||1999
+Volkswagen|DEU|M|350|680|dax|0.2|1937
+Siemens|DEU|M|85|312|dax||1847
+SAP|DEU|T|40|110|dax||1972
+Rheinmetall|DEU|D|12|33|dax||1889
+TotalEnergies|FRA|E|200|102|euronext||1924
+LVMH|FRA|R|90|213|euronext||1987
+Airbus|FRA|D|78|157|euronext|0.26|1970
+BNP Paribas|FRA|F|140|178|euronext||1848
+ASML|NLD|T|33|44|euronext||1984
+Novo Nordisk|DNK|H|45|78|||1923
+Nestle|CHE|G|100|277|||1866
+Roche|CHE|H|68|103|||1896
+Toyota|JPN|M|320|383|nikkei||1937
+Sony|JPN|T|85|113|nikkei||1946
+Mitsubishi UFJ|JPN|F|90|150|nikkei||2005
+SoftBank|JPN|T|45|65|nikkei||1981
+Samsung Electronics|KOR|T|225|262|krx||1969
+SK Hynix|KOR|T|50|33|krx||1983
+Hyundai Motor|KOR|M|125|120|krx||1967
+TSMC|TWN|T|110|83|twse||1987
+Foxconn|TWN|T|215|800|twse||1974
+State Grid|CHN|U|550|1300||1|2002
+Sinopec|CHN|E|430|510|sse|0.69|2000
+ICBC|CHN|F|220|420|sse|0.7|1984
+Tencent|CHN|T|90|110|hkg||1998
+Alibaba|CHN|R|140|120|hkg||1999
+BYD|CHN|M|105|900|hkg||1995
+CATL|CHN|M|55|130|hkg||2011
+Huawei|CHN|T|120|208|||1987
+Reliance Industries|IND|E|120|340|nse||1966
+Tata Consultancy Services|IND|T|30|600|nse||1968
+HDFC Bank|IND|F|50|210|nse||1994
+Gazprom|RUS|E|120|500|moex|0.5|1989
+Rosneft|RUS|E|110|330|moex|0.4|1993
+Saudi Aramco|SAU|E|440|75|tadawul|0.82|1933
+Petrobras|BRA|E|92|42|b3|0.5|1953
+Vale|BRA|N|38|65|b3||1942
+BHP|AUS|N|55|45|asx||1885
+Commonwealth Bank|AUS|F|30|50|asx||1911
+Shopify|CAN|T|10|8|tsx||2006
+Royal Bank of Canada|CAN|F|42|95|tsx||1864
+America Movil|MEX|C|46|175|bmv||2000
+DBS Group|SGP|F|16|41|sgx||1968
+`);
+
+const BY_YEAR: Record<number, CompanySeed[]> = { 1900: C1900, 1914: C1914, 1930: C1930, 1950: C1950, 1990: C1990, 2010: C2010, 2020: C2020, 2026: C2026 };
+
 export function companiesForYear(year: number): CompanySeed[] {
-  if (COMPANIES_BY_YEAR[year]) return COMPANIES_BY_YEAR[year];
-  const keys = Object.keys(COMPANIES_BY_YEAR).map(Number).sort((a, b) => a - b);
-  const nearest = keys.filter((k) => k <= year).pop();
-  return nearest ? COMPANIES_BY_YEAR[nearest] : COMPANIES_2026;
+  return BY_YEAR[year] ?? C2026;
 }

@@ -2,11 +2,10 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import type { Capability, StaffRole, User } from "../shared/types";
 import { SCENARIOS, getScenario } from "../data/scenarios";
-import { COUNTRY_ROWS } from "../data/countries";
+import { COUNTRIES } from "../data/countries";
 import { ALL_ISO3 } from "../data/countries";
 import { SECTORS } from "../data/economy";
 import { WARS_BY_YEAR, TREATIES_BY_YEAR } from "../data/wars";
-import { ERAS } from "../data/eras";
 import { DEFAULT_PARAMS } from "../data/scenarios";
 import {
   type Env,
@@ -108,7 +107,7 @@ app.get("/api/auth/config", (c) =>
  * the capability table. One request, cached at the edge.
  */
 app.get("/api/bootstrap", (c) => {
-  const etag = `W/"boot-${SCENARIOS.length}-${COUNTRY_ROWS.length}"`;
+  const etag = `W/"boot-3-${SCENARIOS.length}-${COUNTRIES.length}"`;
   if (c.req.header("if-none-match") === etag) return c.body(null, 304);
   return c.json(
     {
@@ -123,25 +122,11 @@ app.get("/api/bootstrap", (c) => {
         daysPerSecond: s.daysPerSecond,
         tags: s.tags,
       })),
-      countries: COUNTRY_ROWS.filter((r) => Number(r[8]) > 0).map((r) => ({
-        id: r[1],
-        iso2: r[2],
-        isoNumeric: r[0],
-        name: r[3],
-        demonym: r[4],
-        continent: r[5],
-        region: r[6],
-        government: r[7],
-        population: r[8],
-        gdpPerCapita: r[9],
-        ideology: r[10],
-        bloc: r[11],
-      })),
+      countries: COUNTRIES.map((r) => ({ id: r.iso3, iso2: r.iso2, isoNumeric: r.numeric, name: r.name, demonym: r.name, continent: r.continent, region: r.region, government: r.government, population: r.pop[3], gdpPerCapita: (r.gdp[3] * 1e9) / (r.pop[3] * 1e6), ideology: r.ideology, bloc: r.bloc })),
       sectors: SECTORS,
       defaultParams: DEFAULT_PARAMS,
       capabilities: ALL_CAPABILITIES,
       capabilityLabels: CAPABILITY_LABELS,
-      eras: Object.keys(ERAS),
       warsByYear: Object.fromEntries(Object.entries(WARS_BY_YEAR).map(([y, w]) => [y, w.map((x) => ({ name: x.name, phase: x.phase, belligerents: x.belligerents }))])),
       treatiesByYear: Object.fromEntries(Object.entries(TREATIES_BY_YEAR).map(([y, t]) => [y, t.map((x) => ({ name: x.name, kind: x.kind, parties: x.parties }))])),
     },
@@ -412,6 +397,11 @@ app.get("/api/portrait", async (c) => {
 // ===========================================================================
 
 const simStub = (c: { env: Env }, worldId: string) => c.env.SIM.get(c.env.SIM.idFromName(worldId));
+
+// Multiplayer is disabled for now: the game runs entirely in the browser. These
+// routes stay in the code base but refuse work, so no Durable Object spins up.
+app.all("/api/worlds", (c) => (c.req.method === "GET" ? c.json({ worlds: [], multiplayerDisabled: true }) : c.json({ error: "Multiplayer is disabled" }, 503)));
+app.all("/api/worlds/*", (c) => c.json({ error: "Multiplayer is disabled" }, 503));
 
 app.get("/api/worlds", async (c) => {
   const u = c.get("user");
@@ -830,7 +820,7 @@ export default app;
 
 // Durable Object entrypoint export — wrangler.toml declares class_name = "SimObject",
 // so Wrangler requires a class named SimObject to be exported from this file.
-export { SimObject } from "./sim-object.ts";
+export { SimObject } from "./sim-object";
 
 
 // Keep tree-shaking honest about the re-exports the UI relies on.

@@ -2,309 +2,353 @@ import { create } from "zustand";
 import type {
   Bill,
   Character,
-  ChatMessage,
   Company,
   Country,
+  MapRegion,
   MarketState,
-  OnlineUser,
-  Party,
+  Sanction,
   Scenario,
   TickerEntry,
+  Treaty,
   User,
   War,
   World,
+  WorldDirective,
   WorldEvent,
 } from "../shared/types";
+import { SCENARIOS, DEFAULT_PARAMS } from "../data/scenarios";
+import { COUNTRIES } from "../data/countries";
+import { SECTORS } from "../data/economy";
+import type { SaveMeta } from "./sim.worker";
 
 // ===========================================================================
-// Catalogue (static, loaded once)
+// Catalogue. Singleplayer needs nothing from the server except the account, so
+// it is built right here and the game keeps working if the API is unreachable.
 // ===========================================================================
 
 export interface Bootstrap {
-  scenarios: (Pick<Scenario, "id" | "year" | "name" | "tagline" | "description" | "theme" | "startDate" | "daysPerSecond" | "tags"> & { id: string })[];
-  countries: { id: string; iso2: string; isoNumeric: string; name: string; demonym: string; continent: string; region: string; government: string; population: number; gdpPerCapita: number; ideology: number; bloc: string }[];
-  sectors: Record<string, { id: string; label: string; blurb: string; growth: number; cyclicality: number; commodityExposure: number; techIntensity: number; sanctionExposure: number; margin: number; capitalIntensity: number; labourIntensity: number }>;
+  scenarios: Pick<Scenario, "id" | "year" | "name" | "tagline" | "description" | "theme" | "startDate" | "daysPerSecond" | "tags">[];
+  countries: { id: string; iso2: string; isoNumeric: string; name: string; continent: string; region: string; government: string; population: number; gdpPerCapita: number; ideology: number; bloc: string }[];
+  sectors: typeof SECTORS;
   defaultParams: Record<string, number>;
-  capabilities: string[];
-  capabilityLabels: Record<string, { label: string; group: string; description: string }>;
 }
 
-export interface WorldSummary {
+const LOCAL_BOOTSTRAP: Bootstrap = {
+  scenarios: SCENARIOS.map((s) => ({ id: s.id, year: s.year, name: s.name, tagline: s.tagline, description: s.description, theme: s.theme, startDate: s.startDate, daysPerSecond: s.daysPerSecond, tags: s.tags })),
+  countries: COUNTRIES.map((r) => ({ id: r.iso3, iso2: r.iso2, isoNumeric: r.numeric, name: r.name, continent: r.continent, region: r.region, government: r.government, population: r.pop[3], gdpPerCapita: (r.gdp[3] * 1e9) / (r.pop[3] * 1e6), ideology: r.ideology, bloc: r.bloc })),
+  sectors: SECTORS,
+  defaultParams: DEFAULT_PARAMS as unknown as Record<string, number>,
+};
+
+export interface PolityPreview {
   id: string;
   name: string;
-  scenario_id: string;
-  updated_at: number;
-  created_at: number;
-  members: number;
-  siblings: number;
+  government: string;
+  overlord?: string;
+  gdp: number;
+  population: number;
+  leader: string;
+  leaderTitle: string;
+  region: string;
+  wars: number;
+  debt: number;
+  growth: number;
 }
 
 type ConnectionState = "idle" | "connecting" | "live" | "closed" | "error";
 
-/** What a server patch carries. Everything is optional; absent keys are kept. */
-export interface PatchPayload {
-  countries?: Country[] | Record<string, Country>;
-  parties?: Party[] | Record<string, Party>;
-  companies?: Company[] | Record<string, Company>;
-  characters?: Character[] | Record<string, Character>;
-  bills?: Bill[] | Record<string, Bill>;
+interface PatchPayload {
+  countries?: Country[];
+  companies?: Company[];
+  characters?: Record<string, Character>;
+  bills?: Bill[];
   markets?: MarketState;
-  wars?: War[] | Record<string, War>;
+  wars?: War[];
+  treaties?: Treaty[];
+  sanctions?: Sanction[];
   events?: WorldEvent[];
   ticker?: TickerEntry[];
+  control?: Record<string, string>;
+  regions?: MapRegion[];
   t?: number;
   version?: number;
   paused?: boolean;
   speed?: number;
+  playerCountry?: string;
+  directives?: WorldDirective[];
+  params?: Record<string, number>;
   globals?: World["globals"];
 }
 
 interface Store {
-  // auth
   user: User | null;
-  bootstrap: Bootstrap | null;
+  bootstrap: Bootstrap;
   health: { google: boolean; discord: boolean; password: boolean; env: string; portraits?: boolean } | null;
+  saves: SaveMeta[];
 
-  // lobby
-  worlds: WorldSummary[];
-
-  // world
   worldId: string | null;
   scenario: Bootstrap["scenarios"][number] | null;
   countries: Record<string, Country>;
-  parties: Record<string, Party>;
   characters: Record<string, Character>;
   companies: Record<string, Company>;
   bills: Record<string, Bill>;
   markets: MarketState | null;
   wars: War[];
+  treaties: Treaty[];
+  sanctions: Sanction[];
   events: WorldEvent[];
   ticker: TickerEntry[];
-  chat: ChatMessage[];
-  online: OnlineUser[];
+  control: Record<string, string>;
+  regions: MapRegion[];
   simTime: number;
   version: number;
   paused: boolean;
   speed: number;
   globals: World["globals"] | null;
   connection: ConnectionState;
+  playerCountry: string | null;
+  params: Record<string, number>;
+  directives: WorldDirective[];
 
-  // ui
   selected: string | null;
   layer: string;
   leftTab: string;
   rightTab: string;
   devOpen: boolean;
-  devSection: string;
   notice: { text: string; kind: "ok" | "err" } | null;
-  fullWorld: World | null;
 
-  // actions
   set: (p: Partial<Store>) => void;
   loadBootstrap: () => Promise<void>;
   refreshSelf: () => Promise<void>;
-  loadWorlds: () => Promise<void>;
-  enterWorld: (id: string) => Promise<void>;
-  leaveWorld: () => void;
-  applyPatch: (p: PatchPayload) => void;
+  refreshSaves: () => Promise<void>;
+  startGame: (scenarioId: string, country: string, name?: string) => Promise<void>;
+  loadGame: (saveId: string) => Promise<void>;
+  leaveWorld: () => Promise<void>;
   toast: (text: string, kind?: "ok" | "err") => void;
 }
 
-const initial = {
-  user: null as User | null,
-  bootstrap: null as Bootstrap | null,
-  health: null as { google: boolean; discord: boolean; password: boolean; env: string; portraits?: boolean } | null,
-  worlds: [] as WorldSummary[],
+const worldInitial = {
   worldId: null as string | null,
   scenario: null as Store["scenario"],
   countries: {} as Record<string, Country>,
-  parties: {} as Record<string, Party>,
   characters: {} as Record<string, Character>,
   companies: {} as Record<string, Company>,
   bills: {} as Record<string, Bill>,
   markets: null as MarketState | null,
   wars: [] as War[],
+  treaties: [] as Treaty[],
+  sanctions: [] as Sanction[],
   events: [] as WorldEvent[],
   ticker: [] as TickerEntry[],
-  chat: [] as ChatMessage[],
-  online: [] as OnlineUser[],
+  control: {} as Record<string, string>,
+  regions: [] as MapRegion[],
   simTime: 0,
   version: 0,
-  paused: false,
+  paused: true,
   speed: 1,
   globals: null as World["globals"] | null,
   connection: "idle" as ConnectionState,
+  playerCountry: null as string | null,
+  params: {} as Record<string, number>,
+  directives: [] as WorldDirective[],
   selected: null as string | null,
   layer: "political",
   leftTab: "ticker",
-  rightTab: "country",
+  rightTab: "government",
   devOpen: false,
-  devSection: "console",
-  notice: null as { text: string; kind: "ok" | "err" } | null,
-  fullWorld: null as World | null,
 };
 
-export const useStore = create<Store>((set) => ({
-  ...initial,
+let noticeTimer: ReturnType<typeof setTimeout> | null = null;
+
+export const useStore = create<Store>((set, get) => ({
+  ...worldInitial,
+  user: null,
+  bootstrap: LOCAL_BOOTSTRAP,
+  health: null,
+  saves: [],
+  notice: null,
   set: (p) => set(p),
   toast: (text, kind = "ok") => {
+    if (noticeTimer) clearTimeout(noticeTimer);
     set({ notice: { text, kind } });
-    setTimeout(() => set({ notice: null }), 4200);
+    noticeTimer = setTimeout(() => set({ notice: null }), 4200);
   },
   loadBootstrap: async () => {
-    const [b, h] = await Promise.all([api<Bootstrap>("/api/bootstrap"), api<{ google: boolean; discord: boolean; password: boolean; env: string; portraits?: boolean }>("/api/health")]);
-    set({ bootstrap: b, health: h });
+    const health = await api<NonNullable<Store["health"]>>("/api/health");
+    set({ health });
   },
   refreshSelf: async () => {
     const r = await api<{ user: User | null }>("/api/auth/me");
     set({ user: r.user });
+    await call({ kind: "scope", scope: r.user?.id ?? "local" });
   },
-  loadWorlds: async () => {
-    const r = await api<{ worlds: WorldSummary[] }>("/api/worlds");
-    set({ worlds: r.worlds ?? [] });
+  refreshSaves: async () => {
+    const r = await call<{ saves: SaveMeta[] }>({ kind: "list-saves" });
+    set({ saves: r.saves ?? [] });
   },
-  enterWorld: async (id) => {
-    set({ ...initial, bootstrap: useStore.getState().bootstrap, user: useStore.getState().user, worldId: id, connection: "connecting" });
-    const snap = await api<{ world: World; users: OnlineUser[]; chat: ChatMessage[] }>(`/api/worlds/${encodeURIComponent(id)}/snapshot`);
-    const s = useStore.getState();
-    s.applyPatch({ ...snap.world, countries: Object.values(snap.world.countries), wars: Object.values(snap.world.wars) } as unknown as PatchPayload);
-    set({ fullWorld: snap.world, online: snap.users ?? [], chat: snap.chat ?? [] });
-    const scen = s.bootstrap?.scenarios.find((x) => x.id === snap.world.scenarioId);
-    if (scen) set({ scenario: scen });
-    connect(id, set, getStateSafe());
+  startGame: async (scenarioId, country, name) => {
+    set({ ...worldInitial, connection: "connecting" });
+    const r = await call<{ ok: boolean; message?: string; world: World }>({ kind: "new-game", scenarioId, country, name });
+    if (!r.ok) throw new Error(r.message ?? "Could not start the game");
+    adoptWorld(r.world);
   },
-  leaveWorld: () => {
-    socket?.close();
-    socket = null;
-    set({ ...initial, bootstrap: useStore.getState().bootstrap, user: useStore.getState().user });
+  loadGame: async (saveId) => {
+    set({ ...worldInitial, connection: "connecting" });
+    const r = await call<{ ok: boolean; message?: string; world: World }>({ kind: "load", saveId });
+    if (!r.ok) {
+      set({ connection: "idle" });
+      throw new Error(r.message ?? "Could not load the save");
+    }
+    adoptWorld(r.world);
   },
-  applyPatch: (p: PatchPayload) =>
-    set(() => {
-      const cur = useStore.getState();
-      const countries: Record<string, Country> = { ...cur.countries };
-      if (Array.isArray(p.countries)) for (const c of p.countries) countries[c.id] = { ...(countries[c.id] ?? {}), ...c };
-      else if (p.countries) Object.assign(countries, p.countries);
-      const parties: Record<string, Party> = { ...cur.parties };
-      if (Array.isArray(p.parties)) for (const x of p.parties) parties[x.id] = x;
-      else if (p.parties) Object.assign(parties, p.parties);
-      const companies: Record<string, Company> = { ...cur.companies };
-      if (Array.isArray(p.companies)) for (const x of p.companies) companies[x.id] = x;
-      else if (p.companies) Object.assign(companies, p.companies);
-      const characters: Record<string, Character> = { ...cur.characters };
-      if (Array.isArray(p.characters)) for (const x of p.characters) characters[x.id] = x;
-      else if (p.characters) Object.assign(characters, p.characters);
-      const bills: Record<string, Bill> = { ...cur.bills };
-      if (Array.isArray(p.bills)) for (const x of p.bills) bills[x.id] = x;
-      else if (p.bills) Object.assign(bills, p.bills);
-      return {
-        countries,
-        parties,
-        companies,
-        characters,
-        bills,
-        markets: (p.markets as MarketState) ?? cur.markets,
-        wars: Array.isArray(p.wars) ? p.wars : p.wars ? Object.values(p.wars) : cur.wars,
-        events: (p.events as WorldEvent[]) ?? cur.events,
-        ticker: (p.ticker as TickerEntry[]) ?? cur.ticker,
-        simTime: typeof p.t === "number" ? p.t : cur.simTime,
-        version: typeof p.version === "number" ? p.version : cur.version,
-        paused: typeof p.paused === "boolean" ? p.paused : cur.paused,
-        speed: typeof p.speed === "number" ? p.speed : cur.speed,
-        globals: (p.globals as World["globals"]) ?? cur.globals,
-      };
-    }),
+  leaveWorld: async () => {
+    await call({ kind: "leave" });
+    set({ ...worldInitial });
+    await get().refreshSaves();
+  },
 }));
 
-function getStateSafe() {
-  return useStore.getState();
+function adoptWorld(w: World): void {
+  const scenario = useStore.getState().bootstrap.scenarios.find((s) => s.id === w.scenarioId) ?? null;
+  useStore.setState({
+    worldId: w.id,
+    scenario,
+    connection: "live",
+    countries: w.countries,
+    characters: w.characters,
+    companies: w.companies,
+    bills: w.bills,
+    markets: w.markets,
+    wars: Object.values(w.wars),
+    treaties: Object.values(w.treaties).filter((t) => t.active),
+    sanctions: Object.values(w.sanctions),
+    events: w.events.slice(-40),
+    ticker: w.ticker.slice(0, 60),
+    control: w.control,
+    regions: w.regions,
+    simTime: w.t,
+    version: w.version,
+    paused: w.paused,
+    speed: w.speed,
+    globals: w.globals,
+    playerCountry: w.playerCountry ?? null,
+    selected: w.playerCountry ?? null,
+    params: w.params as unknown as Record<string, number>,
+    directives: w.directives,
+  });
+}
+
+function applyPatch(p: PatchPayload): void {
+  const cur = useStore.getState();
+  const countries: Record<string, Country> = {};
+  for (const c of p.countries ?? []) {
+    const prev = cur.countries[c.id];
+    countries[c.id] = { ...c, relations: c.relations ?? prev?.relations ?? {}, economy: c.economy.history.length ? c.economy : { ...c.economy, history: prev?.economy.history ?? [] } };
+  }
+  const companies: Record<string, Company> = {};
+  for (const c of p.companies ?? []) companies[c.id] = c;
+  const bills: Record<string, Bill> = {};
+  for (const b of p.bills ?? []) bills[b.id] = b;
+  useStore.setState({
+    countries: p.countries ? countries : cur.countries,
+    companies: p.companies ? companies : cur.companies,
+    characters: p.characters ?? cur.characters,
+    bills: p.bills ? bills : cur.bills,
+    markets: p.markets ?? cur.markets,
+    wars: p.wars ?? cur.wars,
+    treaties: p.treaties ?? cur.treaties,
+    sanctions: p.sanctions ?? cur.sanctions,
+    events: p.events ?? cur.events,
+    ticker: p.ticker ?? cur.ticker,
+    control: p.control ?? cur.control,
+    regions: p.regions ?? cur.regions,
+    simTime: p.t ?? cur.simTime,
+    version: p.version ?? cur.version,
+    paused: p.paused ?? cur.paused,
+    speed: p.speed ?? cur.speed,
+    globals: p.globals ?? cur.globals,
+    playerCountry: p.playerCountry ?? cur.playerCountry,
+    params: p.params ?? cur.params,
+    directives: p.directives ?? cur.directives,
+  });
 }
 
 // ===========================================================================
-// WebSocket
+// The simulation worker
 // ===========================================================================
 
-let socket: WebSocket | null = null;
-let reconnectTimer: number | null = null;
-let reconnectDelay = 1000;
+let worker: Worker | null = null;
+let nextId = 1;
+const pending = new Map<number, (v: unknown) => void>();
 
-function connect(worldId: string, set: (p: Partial<Store>) => void, store: Store): void {
-  socket?.close();
-  const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const u = store.user;
-  const qs = new URLSearchParams({
-    userId: u?.id ?? "anon",
-    username: u?.username ?? "guest",
-    avatar: u?.avatar ?? "",
-    staffRole: u?.staffRole ?? "player",
-    country: u?.playsCountry ?? "",
-  });
-  const ws = new WebSocket(`${proto}//${location.host}/api/worlds/${encodeURIComponent(worldId)}/ws?${qs}`);
-  socket = ws;
-  set({ connection: "connecting" });
-
-  ws.onopen = () => {
-    reconnectDelay = 1000;
-    set({ connection: "live" });
-  };
-
-  ws.onmessage = (ev) => {
-    let msg: Record<string, unknown>;
-    try {
-      msg = JSON.parse(String(ev.data));
-    } catch {
-      return;
-    }
-    const st = useStore.getState();
-    switch (msg.type) {
-      case "snapshot": {
-        const w = msg.world as World;
-        st.applyPatch({ ...w, countries: Object.values(w.countries), wars: Object.values(w.wars) } as unknown as PatchPayload);
-        set({ fullWorld: w, online: (msg.users as OnlineUser[]) ?? [] });
+function ensureWorker(): Worker {
+  if (worker) return worker;
+  worker = new Worker(new URL("./sim.worker.ts", import.meta.url), { type: "module" });
+  worker.onmessage = (ev: MessageEvent<Record<string, unknown>>) => {
+    const m = ev.data;
+    switch (m.type) {
+      case "reply": {
+        const done = pending.get(m.id as number);
+        pending.delete(m.id as number);
+        done?.(m.result);
         break;
       }
       case "patch":
-        st.applyPatch(msg as never);
+        applyPatch(m as PatchPayload);
         break;
-      case "event":
-        set({ events: [...st.events, msg.event as WorldEvent].slice(-300) });
+      case "snapshot":
+        adoptWorld(m.world as World);
         break;
-      case "ticker":
-        set({ ticker: [msg.entry as TickerEntry, ...st.ticker].slice(0, 80) });
-        break;
-      case "presence":
-        set({ online: (msg.users as OnlineUser[]) ?? [] });
-        break;
-      case "chat":
-        set({ chat: [...st.chat, msg.message as ChatMessage].slice(-300) });
+      case "saved":
+        if (!(m.auto as boolean)) useStore.getState().toast("Game saved");
         break;
       case "error":
-        st.toast(String(msg.message), "err");
+        useStore.getState().toast(`Simulation paused: ${String(m.message)}`, "err");
         break;
     }
   };
-
-  ws.onclose = () => {
-    set({ connection: "closed" });
-    if (reconnectTimer) window.clearTimeout(reconnectTimer);
-    reconnectTimer = window.setTimeout(() => connect(worldId, set, useStore.getState()), reconnectDelay);
-    reconnectDelay = Math.min(15_000, reconnectDelay * 1.7);
+  worker.onerror = (e) => {
+    useStore.setState({ connection: "error" });
+    useStore.getState().toast(`Simulation worker failed: ${e.message}`, "err");
   };
-
-  ws.onerror = () => set({ connection: "error" });
+  return worker;
 }
 
-export function sendChat(text: string, channel: ChatMessage["channel"] = "global"): void {
-  const u = useStore.getState().user;
-  socket?.send(
-    JSON.stringify({
-      type: "chat",
-      chat: { text, channel, country: u?.playsCountry },
-    }),
-  );
+export function call<T = { ok: boolean; message: string }>(msg: Record<string, unknown>): Promise<T> {
+  const w = ensureWorker();
+  const id = nextId++;
+  return new Promise<T>((resolve) => {
+    pending.set(id, resolve as (v: unknown) => void);
+    w.postMessage({ ...msg, id });
+  });
+}
+
+export async function previewScenario(scenarioId: string): Promise<PolityPreview[]> {
+  const r = await call<{ polities: PolityPreview[] }>({ kind: "preview", scenarioId });
+  return r.polities ?? [];
+}
+
+export function focusCountry(country: string | null): void {
+  void call({ kind: "focus", country });
+}
+
+/** Send a player command to the simulation. The first argument is kept so dev tools can share a signature. */
+export async function playerAction(_worldId: string, body: Record<string, unknown>): Promise<{ ok: boolean; message: string; data?: unknown }> {
+  return call({ kind: "command", body });
+}
+
+export async function act(body: Record<string, unknown>): Promise<{ ok: boolean; message: string; data?: unknown }> {
+  const r = await call<{ ok: boolean; message: string; data?: unknown }>({ kind: "command", body });
+  useStore.getState().toast(r.message, r.ok ? "ok" : "err");
+  return r;
+}
+
+export async function devOp(_worldId: string, body: Record<string, unknown>): Promise<{ ok: boolean; message: string; data?: unknown }> {
+  return call({ kind: "dev", body, username: useStore.getState().user?.username });
 }
 
 // ===========================================================================
-// API client
+// Accounts stay on the server.
 // ===========================================================================
 
 export class ApiError extends Error {
@@ -314,25 +358,16 @@ export class ApiError extends Error {
 }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    ...init,
-    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
-    credentials: "same-origin",
-  });
+  const res = await fetch(path, { ...init, headers: { "content-type": "application/json", ...(init?.headers ?? {}) }, credentials: "same-origin" });
   const text = await res.text();
-  const body = text ? (JSON.parse(text) as unknown) : null;
-  if (!res.ok) {
-    throw new ApiError((body as { error?: string })?.error ?? `${res.status} ${res.statusText}`, res.status);
+  let body: unknown = null;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    throw new ApiError(`The server sent an unexpected response (${res.status}).`, res.status);
   }
+  if (!res.ok) throw new ApiError((body as { error?: string })?.error ?? `${res.status} ${res.statusText}`, res.status);
   return body as T;
-}
-
-export async function playerAction(worldId: string, body: Record<string, unknown>): Promise<{ ok: boolean; message: string; data?: unknown }> {
-  return api(`/api/worlds/${encodeURIComponent(worldId)}/action`, { method: "POST", body: JSON.stringify(body) });
-}
-
-export async function devOp(worldId: string, body: Record<string, unknown>): Promise<{ ok: boolean; message: string; data?: unknown }> {
-  return api(`/api/worlds/${encodeURIComponent(worldId)}/dev`, { method: "POST", body: JSON.stringify(body) });
 }
 
 export function can(user: User | null, cap: string): boolean {
