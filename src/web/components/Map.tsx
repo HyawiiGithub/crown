@@ -253,19 +253,48 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
     return () => el.removeEventListener("wheel", onWheel);
   }, [applyZoom]);
 
+  const fingers = useRef(new Map<number, { x: number; y: number }>());
+  const pinchGap = useRef(0);
+
   const onPointerDown = (e: React.PointerEvent) => {
+    fingers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (fingers.current.size === 2) {
+      const [a, b] = [...fingers.current.values()];
+      pinchGap.current = Math.hypot(a.x - b.x, a.y - b.y);
+      if (drag.current) drag.current.moved = true;
+      return;
+    }
     drag.current = { x: e.clientX, y: e.clientY, tx: transform.x, ty: transform.y, moved: false };
   };
   const onPointerMove = (e: React.PointerEvent) => {
+    if (fingers.current.has(e.pointerId)) fingers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (fingers.current.size >= 2) {
+      const [a, b] = [...fingers.current.values()];
+      const gap = Math.hypot(a.x - b.x, a.y - b.y);
+      const rect = wrapRef.current?.getBoundingClientRect();
+      if (rect && pinchGap.current > 0 && gap > 0) applyZoom(gap / pinchGap.current, (a.x + b.x) / 2 - rect.left, (a.y + b.y) / 2 - rect.top);
+      pinchGap.current = gap;
+      return;
+    }
     if (!drag.current || e.buttons === 0) return;
     const dx = e.clientX - drag.current.x;
     const dy = e.clientY - drag.current.y;
-    if (Math.abs(dx) + Math.abs(dy) > 4) drag.current.moved = true;
+    if (Math.abs(dx) + Math.abs(dy) > 6) drag.current.moved = true;
     if (drag.current.moved) setTransform((t) => ({ ...t, x: drag.current!.tx + dx, y: drag.current!.ty + dy }));
   };
-  const endDrag = () => {
+  const endDrag = (e: React.PointerEvent) => {
+    fingers.current.delete(e.pointerId);
+    if (fingers.current.size === 1) {
+      // Carry on panning with the finger that stayed down, without a jump.
+      const [rest] = [...fingers.current.values()];
+      setTransform((t) => {
+        drag.current = { x: rest.x, y: rest.y, tx: t.x, ty: t.y, moved: true };
+        return t;
+      });
+      return;
+    }
     window.setTimeout(() => {
-      drag.current = null;
+      if (!fingers.current.size) drag.current = null;
     }, 0);
   };
   const pick = (id: string) => {
