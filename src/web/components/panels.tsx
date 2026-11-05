@@ -489,8 +489,7 @@ function Trade({ c, mine }: { c: Country; mine: boolean }) {
           rowKey={([id]) => id}
           columns={[
             { id: "p", label: "Partner", render: ([id]) => <span className="truncate">{countries[id]?.name ?? id}</span> },
-            { id: "v", label: "Volume", right: true, render: ([, v]) => <span className="mono">${credits(v)}</span> },
-            { id: "b", label: "Barrier", right: true, render: ([id]) => <span className={`mono ${barriers[id] ? "neg" : "dim"}`}>{barriers[id] ? pct0(barriers[id]) : "none"}</span> },
+            { id: "v", label: "Volume", right: true, render: ([id, v]) => <span className="mono">${credits(v)}{barriers[id] ? <span className="neg"> · {pct0(barriers[id])}</span> : null}</span> },
             ...(mine ? [{
               id: "a", label: "", right: true, render: ([id]: [string, number]) => (
                 <span className="row" style={{ gap: 3, justifyContent: "flex-end" }}>
