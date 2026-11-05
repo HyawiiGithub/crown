@@ -245,6 +245,8 @@ function WorldShell() {
   const growth = avgGrowth();
 
   const pick = (id: string) => s.set({ selected: id, rightTab: id === s.playerCountry ? "government" : "country" });
+  // On phones only one of map, news and country is on screen at a time.
+  const [mobileView, setMobileView] = useState<"map" | "news" | "country">("map");
 
   const saveNow = async () => {
     const r = await call<{ ok: boolean; message: string }>({ kind: "save", slot: "manual" });
@@ -263,7 +265,7 @@ function WorldShell() {
   };
 
   return (
-    <div className="app">
+    <div className="app" data-view={mobileView}>
       <header className="masthead">
         <span className="masthead__title">{scenario?.theme.masthead ?? "CROWN"}</span>
         <span className="masthead__date mono">{scenario ? simDate(scenario.startDate, s.simTime) : ""}</span>
@@ -319,6 +321,9 @@ function WorldShell() {
           focus={s.selected ? { iso3: s.selected, relations: s.countries[s.selected]?.relations } : null}
           theme={theme}
         />
+        {selected && (
+          <button className="btn mobile-chip" onClick={() => setMobileView("country")}>{selected.name} details</button>
+        )}
       </main>
 
       <aside className="rail-right">
@@ -336,6 +341,12 @@ function WorldShell() {
           {s.rightTab === "markets" && <MarketPanel markets={s.markets} companies={s.companies} />}
         </div>
       </aside>
+
+      <nav className="mobile-nav" aria-label="Game views">
+        {([["map", "Map"], ["news", "News"], ["country", "Country"]] as const).map(([id, label]) => (
+          <button key={id} className={mobileView === id ? "active" : ""} onClick={() => setMobileView(id)}>{label}</button>
+        ))}
+      </nav>
 
       {s.devOpen && isDevUser(s.user) && s.worldId && (
         <DevMenu worldId={s.worldId} user={s.user!} countries={s.countries} companies={s.companies} directives={directives} params={s.params} simTime={s.simTime} paused={s.paused} speed={s.speed} onClose={() => s.set({ devOpen: false })} toast={s.toast} />
