@@ -25,7 +25,8 @@ const GOOGLE_USERINFO = "https://openidconnect.googleapis.com/v1/userinfo";
 
 export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const STATE_TTL_SECONDS = 600;
-const PBKDF2_ITERATIONS = 210_000;
+// Cloudflare Workers refuse PBKDF2 above 100,000 iterations.
+const PBKDF2_ITERATIONS = 100_000;
 export const PASSWORD_MIN_LENGTH = 10;
 export const PASSWORD_MAX_LENGTH = 200;
 
