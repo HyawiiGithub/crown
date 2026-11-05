@@ -207,6 +207,44 @@ const pc = (v: number) => `${(v * 100).toFixed(1)}%`;
   check("morale recovers", b.c.military.morale > 0);
 }
 
+// Conscription cannot be toggled for free soldiers.
+{
+  const g = game("2026", "GBR");
+  g.cmd({ type: "military", conscription: false });
+  const start = g.c.military.reserves;
+  for (let i = 0; i < 5; i++) {
+    g.cmd({ type: "military", conscription: true });
+    g.cmd({ type: "military", conscription: false });
+  }
+  check("toggling conscription gains nothing", Math.abs(g.c.military.reserves - start) <= 5, `${start} -> ${g.c.military.reserves}`);
+}
+
+// Crossing the sea.
+{
+  const strong = game("2026", "USA");
+  strong.cmd({ type: "declare-war", target: "CUB", cause: "t" });
+  const w = Object.values(strong.world.wars).find((x) => x.belligerents.USA && x.belligerents.CUB)!;
+  check("an island is an overseas invasion", w.fronts[0].overseas === true && w.fronts[0].control >= 1, w.fronts[0].name);
+  strong.engine.advanceDays(180);
+  check("a great navy takes an island", w.fronts[0].control > 5, `control ${w.fronts[0].control.toFixed(1)}`);
+
+  const weak = game("2026", "ARG");
+  weak.cmd({ type: "declare-war", target: "USA", cause: "t" });
+  const repelled = Object.values(weak.world.wars).find((x) => x.belligerents.ARG && x.belligerents.USA)!;
+  weak.engine.advanceDays(365);
+  check("a failed invasion does not bring the enemy to your shore", repelled.fronts[0].control >= 0, `control ${repelled.fronts[0].control.toFixed(1)}`);
+
+  const land = game("2026", "USA");
+  land.cmd({ type: "declare-war", target: "MEX", cause: "t" });
+  const border = Object.values(land.world.wars).find((x) => x.belligerents.USA && x.belligerents.MEX)!;
+  check("neighbours fight across a land front", !border.fronts[0].overseas);
+
+  const rus = game("1950", "USS");
+  rus.cmd({ type: "declare-war", target: "TUR", cause: "t" });
+  const t = Object.values(rus.world.wars).find((x) => x.belligerents.USS && x.belligerents.TUR)!;
+  check("the USSR and Turkey share a border", !t.fronts[0].overseas);
+}
+
 // A saved game continues identically.
 {
   const g = game("2026", "USA");

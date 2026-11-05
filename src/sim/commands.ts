@@ -195,7 +195,10 @@ export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Reco
     case "declare-war": {
       const target = String(body.target);
       if (c.overlord && c.dependencies) return { ok: false, message: `${c.name} cannot declare war without its overlord.` };
-      if (c.alliances.includes(target)) return { ok: false, message: "You cannot attack a treaty ally. Leave the treaty first." };
+      if (c.alliances.includes(target)) {
+        const pact = Object.values(world.treaties).find((t) => t.active && t.parties.includes(c.id) && t.parties.includes(target));
+        return { ok: false, message: `${world.countries[target]?.name ?? target} is your treaty ally${pact ? ` under ${pact.name}` : ""}. Leave that treaty first, in the Foreign tab.` };
+      }
       const war = declareWar(world, c.id, target, String(body.cause ?? "A territorial dispute."));
       if (!war) return { ok: false, message: "War could not be declared." };
       c.executive.approval = clamp(c.executive.approval + (rulesByDecree(c.government) ? 2 : -4), 0, 100);
@@ -444,9 +447,12 @@ export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Reco
         return { ok: true, message: `${move.toLocaleString("en-US")} reservists called up.` };
       }
       if (body.conscription !== undefined) {
-        m.conscription = Boolean(body.conscription);
-        if (m.conscription) m.reserves = Math.round(m.reserves * 1.5);
-        return { ok: true, message: m.conscription ? "Conscription introduced." : "Conscription abolished." };
+        const on = Boolean(body.conscription);
+        if (on === m.conscription) return { ok: false, message: on ? "Conscription is already in force." : "There is no conscription to end." };
+        m.conscription = on;
+        // Ending the draft sends the extra reservists home, so toggling gains nothing.
+        m.reserves = Math.round(on ? m.reserves * 1.5 : m.reserves / 1.5);
+        return { ok: true, message: on ? "Conscription introduced." : "Conscription abolished." };
       }
       return { ok: false, message: "No military order given." };
     }
