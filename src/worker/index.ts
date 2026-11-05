@@ -30,6 +30,7 @@ import {
   parseUser,
   registerWithPassword,
   resolveSession,
+  sessionCookieName,
   sessionCookie,
   setCapabilities,
   upsertOAuthUser,
@@ -48,8 +49,9 @@ const app = new Hono<AppEnv>();
 // ===========================================================================
 
 app.use("/api/*", async (c, next) => {
-  const token = getCookie(c, c.env.SESSION_COOKIE);
-  c.set("user", token ? await resolveSession(c.env, token) : null);
+  const token = getCookie(c, sessionCookieName(c.env));
+  // A session lookup failure must read as signed out, not break every route.
+  c.set("user", token ? await resolveSession(c.env, token).catch(() => null) : null);
   await next();
 });
 
@@ -286,7 +288,7 @@ app.get("/api/auth/me", (c) => {
 });
 
 app.post("/api/auth/logout", async (c) => {
-  const token = getCookie(c, c.env.SESSION_COOKIE);
+  const token = getCookie(c, sessionCookieName(c.env));
   if (token) {
     const u = c.get("user");
     await destroySession(c.env, token);

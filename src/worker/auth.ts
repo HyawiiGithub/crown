@@ -561,6 +561,15 @@ export async function setCapabilities(env: Env, userId: string, role: StaffRole,
 // Sessions
 // ===========================================================================
 
+export function sessionCookieName(env: Env): string {
+  return env.SESSION_COOKIE || "crown_session";
+}
+
+/** Share the login between the bare domain and www. */
+function cookieDomain(env: Env): string {
+  return env.ENVIRONMENT === "production" ? "; Domain=crowngamestudios.com" : "";
+}
+
 export async function createSession(env: Env, user: User, ip?: string, userAgent?: string): Promise<{ token: string; expiresAt: number }> {
   const token = randomString(32);
   const hash = await sha256(token);
@@ -653,9 +662,9 @@ export async function recordLoginAttempt(env: Env, bucket: string): Promise<void
 
 export function sessionCookie(env: Env, token: string, maxAge: number): string {
   const secure = env.ENVIRONMENT === "production" ? " Secure;" : "";
-  return `${env.SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
+  return `${sessionCookieName(env)}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}${cookieDomain(env)}`;
 }
 
 export function clearCookie(env: Env): string {
-  return `${env.SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+  return `${sessionCookieName(env)}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${cookieDomain(env)}`;
 }

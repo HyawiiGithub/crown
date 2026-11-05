@@ -53,6 +53,7 @@ not_found_handling = "single-page-application"
 [vars]
 ENVIRONMENT = "production"
 PUBLIC_ORIGIN = "https://www.crowngamestudios.com"
+SESSION_COOKIE = "crown_session"
 
 # Secrets -- set with `wrangler secret put <NAME>`:
 #   DISCORD_CLIENT_ID
