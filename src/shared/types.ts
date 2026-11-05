@@ -917,6 +917,12 @@ export type WarPhase =
   | "ended";
 
 export interface Front {
+  /** Direction of advance across the map: from lon, from lat, to lon, to lat. */
+  axis?: [number, number, number, number];
+  /** Polity whose land is fought over, when it is not simply the loser's. "none" draws no occupation. */
+  theatre?: string;
+  /** Last occupation milestone announced, in 5% steps. */
+  lastBucket?: number;
   id: EntityId;
   name: string;
   /** ISO3 codes contesting this front. */
@@ -935,6 +941,8 @@ export interface Insurgency { id: string; name: string; strength: number }
 export interface War {
   /** Non-state forces in this war, keyed by belligerent id. */
   rebels?: Record<string, Insurgency>;
+  /** Orders per belligerent; absent means balanced. */
+  stance?: Record<string, "offensive" | "balanced" | "defensive">;
   id: EntityId;
   name: string;
   startedAt: SimSeconds;

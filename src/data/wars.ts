@@ -18,6 +18,31 @@ const W = (name: string, cause: string, a: string[], b: string[], front: string,
   warGoal: goal,
 });
 
+/** Where each front runs. The axis points from the holder's side into the contested land. */
+export const FRONT_GEO: Record<string, { axis?: [number, number, number, number]; theatre?: string }> = {
+  "Russo-Ukrainian War": { axis: [39, 45, 25, 51.5] },
+  "Sudanese Civil War": { axis: [22, 13, 36, 18] },
+  "Myanmar Civil War": { axis: [101, 23, 95, 17] },
+  "Syrian Civil War": { axis: [36, 37, 40, 33] },
+  "Yemeni Civil War": { axis: [43.5, 16.5, 50, 14] },
+  "War in Afghanistan": { axis: [69, 30, 67, 37] },
+  "Libyan Civil War": { axis: [22, 30, 11, 32] },
+  "War in Somalia": { axis: [42, 0, 47, 8] },
+  "Iraq Insurgency": { axis: [41, 35, 46, 31] },
+  "Afghan Civil War": { axis: [71, 36, 64, 32] },
+  "Ethiopian Civil War": { axis: [39, 16, 39, 7] },
+  "Liberian Civil War": { axis: [-8, 7.5, -11, 6] },
+  "Gulf Crisis": { theatre: "none" },
+  "Second Boer War": { theatre: "CPC", axis: [30, -26, 19, -33] },
+  "Philippine-American War": { theatre: "UOT" },
+  "Mexican Revolution": { axis: [-108, 30, -96, 17] },
+  "Thousand Days' War": { axis: [-72, 7, -77, 3] },
+  "Central Plains War": { axis: [112, 37, 118, 30] },
+  "Pacification of Libya": { theatre: "ICO", axis: [24, 31, 12, 30] },
+  "First Indochina War": { theatre: "IDC", axis: [105, 23, 107, 11] },
+  "Malayan Emergency": { theatre: "BMA", axis: [102, 6, 104, 1.5] },
+};
+
 export const WARS_BY_YEAR: Record<number, WarSeed[]> = {
   1900: [
     W("Second Boer War", "The franchise of the uitlanders in the Transvaal and British claims over the goldfields.", ["GBR", "CPC", "CAN", "AUC", "NZL"], ["SAR", "OFS"], "Natal and the Veld", "plains", -10, 15, 25, "Annex the Boer republics."),
@@ -48,13 +73,13 @@ export const WARS_BY_YEAR: Record<number, WarSeed[]> = {
   ],
   2020: [
     W("Syrian Civil War", "Assad's government, backed by Russia and Iran, is fighting the last rebel holdouts in Idlib.", ["SYR", "RUS", "IRN"], ["SYR_REB", "TUR"], "Idlib", "urban", 65, 70, 60, "Reconquer Syria."),
-    W("Yemeni Civil War", "The Saudi-led coalition is fighting the Houthis, who hold Sanaa.", ["SAU", "YEM", "ARE"], ["YEM_REB"], "Marib", "desert", -25, 55, 45, "Restore the recognised government."),
+    W("Yemeni Civil War", "The Saudi-led coalition is fighting the Houthis, who hold Sanaa.", ["SAU", "YEM", "ARE"], ["YEM_REB"], "Marib", "desert", 30, 55, 45, "Restore the recognised government."),
     W("War in Afghanistan", "Peace talks with the Taliban have begun under the February Doha agreement.", ["USA", "AFG"], ["AFG_REB"], "Afghan Provinces", "mountain", -10, 65, 45, "Withdraw without collapse."),
     W("Libyan Civil War", "Haftar's forces are besieging Tripoli.", ["LBY", "TUR"], ["LBY_REB"], "Tripoli", "urban", 5, 45, 40, "Hold Tripoli."),
   ],
   2026: [
-    W("Russo-Ukrainian War", "Russia launched a full-scale invasion of Ukraine in February 2022.", ["RUS"], ["UKR"], "Donbas and Zaporizhzhia", "plains", 22, 58, 62, "Force a settlement on the current line, or restore Ukraine's borders."),
-    W("Sudanese Civil War", "The Sudanese Armed Forces and Rapid Support Forces have fought since April 2023.", ["SDN"], ["SDN_REB"], "Darfur and Kordofan", "desert", -10, 70, 65, "Defeat the Rapid Support Forces."),
+    W("Russo-Ukrainian War", "Russia launched a full-scale invasion of Ukraine in February 2022.", ["RUS"], ["UKR"], "Donbas and Zaporizhzhia", "plains", 19.5, 58, 62, "Force a settlement on the current line, or restore Ukraine's borders."),
+    W("Sudanese Civil War", "The Sudanese Armed Forces and Rapid Support Forces have fought since April 2023.", ["SDN"], ["SDN_REB"], "Darfur and Kordofan", "desert", 10, 70, 65, "Defeat the Rapid Support Forces."),
     W("Myanmar Civil War", "Resistance forces and ethnic armies are fighting the junta.", ["MMR"], ["MMR_REB"], "Shan and Sagaing", "forest", -15, 60, 50, "Keep the junta in power."),
   ],
 };

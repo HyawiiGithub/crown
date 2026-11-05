@@ -378,8 +378,10 @@ label.field > span { display: block; font-size: 11px; color: var(--ink-muted); m
    Singleplayer shell
    =========================================================================== */
 
-.root-column { display: flex; flex-direction: column; height: 100%; }
-.root-screen { flex: 1; min-height: 0; position: relative; }
+html, body { position: fixed; inset: 0; width: 100%; overflow: hidden; }
+.root-column { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: hidden; }
+.root-screen { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+.app { grid-template-rows: var(--header-h) minmax(0, 1fr); }
 .mp-warning {
   flex: none;
   height: 28px;
@@ -392,7 +394,7 @@ label.field > span { display: block; font-size: 11px; color: var(--ink-muted); m
   font-size: 12.5px;
   font-weight: 600;
   letter-spacing: .04em;
-  z-index: 500;
+  z-index: 1000;
 }
 .gate { height: 100%; }
 .ink-text { color: var(--ink); }

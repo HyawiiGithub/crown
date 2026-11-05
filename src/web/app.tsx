@@ -28,8 +28,10 @@ const LAYERS: { id: MapLayer; label: string }[] = [
   { id: "relations", label: "Relations" },
 ];
 
-/** Shown on every screen, including sign-in. */
+/** Shown on sign-in and the scenario screen, not during a game. */
 function MultiplayerWarning() {
+  const inGame = useStore((s) => Boolean(s.worldId));
+  if (inGame) return null;
   return <div className="mp-warning" role="alert">Warning: Multiplayer Disabled</div>;
 }
 
