@@ -54,3 +54,65 @@ export function occupiedShare(c: Country, wars: War[], countries: Record<string,
   }
   return total;
 }
+
+export interface PeaceStanding {
+  /** Share of the enemy's land you hold, and the front it sits on. */
+  mine: number;
+  mineFront: number;
+  /** Share of your land the enemy holds, and the front it sits on. */
+  theirs: number;
+  theirsFront: number;
+  /** How much the enemy will concede; negative means they expect concessions from you. */
+  leverage: number;
+}
+
+export function peaceStanding(war: War, me: string, enemy: string, countries: Record<string, Country>): PeaceStanding {
+  let mine = 0;
+  let mineFront = -1;
+  let theirs = 0;
+  let theirsFront = -1;
+  war.fronts.forEach((f, i) => {
+    const o = frontOccupation(war, f, countries);
+    if (!o) return;
+    const owner = countries[o.territory];
+    if (o.holder === me && (o.territory === enemy || owner?.overlord === enemy) && o.share > mine) {
+      mine = o.share;
+      mineFront = i;
+    }
+    if (o.holder === enemy && (o.territory === me || owner?.overlord === me) && o.share > theirs) {
+      theirs = o.share;
+      theirsFront = i;
+    }
+  });
+  const myTired = war.exhaustion[me] ?? 0;
+  const theirTired = war.exhaustion[enemy] ?? 0;
+  const leverage = mine * 110 - theirs * 110 + (theirTired - myTired) * 0.6 + (theirTired > 75 ? 15 : 0) - (myTired > 75 ? 15 : 0);
+  return { mine, mineFront, theirs, theirsFront, leverage };
+}
+
+export interface PeaceTerms {
+  annexOccupied?: boolean;
+  annexWhole?: boolean;
+  cede?: boolean;
+  /** Share of the enemy's land you drew on the map. */
+  drawnShare?: number;
+  /** Fraction of the enemy's GDP they pay you; negative means you pay them. */
+  reparations?: number;
+}
+
+/** What the terms ask of the enemy, on the same scale as leverage. */
+export function peaceCost(terms: PeaceTerms, standing: PeaceStanding): number {
+  let cost = 0;
+  if (terms.annexWhole) cost += 100;
+  else {
+    if (terms.annexOccupied) cost += standing.mine * 100;
+    if (terms.drawnShare) cost += terms.drawnShare * 100;
+  }
+  if (terms.cede) cost -= standing.theirs * 100;
+  cost += (terms.reparations ?? 0) * 200;
+  return cost;
+}
+
+export function peaceAccepted(terms: PeaceTerms, standing: PeaceStanding): boolean {
+  return peaceCost(terms, standing) <= standing.leverage + 3;
+}

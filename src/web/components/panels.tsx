@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import type { BudgetPlan, Character, Company, Country, MarketState, SectorId, Sanction, TaxPolicy, Treaty, War } from "../../shared/types";
 import { SECTORS, COMMODITY_LABELS } from "../../data/economy";
 import { COUNTRY_BY_ISO3 } from "../../data/countries";
-import { frontOccupation, occupiedShare } from "../../sim/occupation";
+import { frontOccupation, occupiedShare, peaceAccepted, peaceCost, peaceStanding } from "../../sim/occupation";
+import { frontRing } from "./Map";
 import { act, can, useStore } from "../store";
 import { credits, money, pct, pct0, people, signedPct, GOVERNMENT_LABELS, deltaClass, simDate, YEAR } from "../format";
 import { Bar, Chip, DataTable, Empty, Panel, Spark, Stat, Tabs } from "./primitives";
@@ -694,7 +695,7 @@ function Foreign({ c, mine }: { c: Country; mine: boolean }) {
             <Stat label="Exhaustion" value={Math.round(w.exhaustion[c.id] ?? 0)} />
             {w.fronts.map((f) => { const label = occupationLabel(w, f, countries); return label ? <div key={f.id} className="mono" style={{ fontSize: 11 }}>{label}</div> : null; })}
             {mine && w.belligerents[c.id] && <StanceButtons war={w} player={c.id} />}
-            {mine && w.belligerents[c.id] && <button className="btn btn--sm" style={{ marginTop: 4 }} onClick={() => void act({ type: "seek-peace", war: w.id })}>Seek peace</button>}
+            {mine && w.belligerents[c.id] && <button className="btn btn--sm btn--primary" style={{ marginTop: 4 }} onClick={() => useStore.getState().set({ peaceWar: w.id, peaceDrawn: null })}>Peace deal</button>}
           </div>
         ))}
       </Panel>
@@ -839,6 +840,95 @@ function occupationLabel(w: War, f: War["fronts"][number], countries: Record<str
   return o && o.share >= 0.005 ? `${o.holderName} holds ${(o.share * 100).toFixed(1)}% of ${countries[o.territory].name}` : "";
 }
 
+/** Negotiate an end to a war: take land, give land, and settle the bill. */
+export function PeaceDeal() {
+  const warId = useStore((s) => s.peaceWar);
+  const drawing = useStore((s) => s.peaceDrawing);
+  const drawn = useStore((s) => s.peaceDrawn);
+  const wars = useStore((s) => s.wars);
+  const countries = useStore((s) => s.countries);
+  const player = useStore((s) => s.playerCountry);
+  const set = useStore((s) => s.set);
+  const [enemyChoice, setEnemy] = useState<string | null>(null);
+  const [annexOccupied, setAnnexOccupied] = useState(false);
+  const [annexWhole, setAnnexWhole] = useState(false);
+  const [cede, setCede] = useState(false);
+  const [reparations, setReparations] = useState(0);
+  const war = wars.find((w) => w.id === warId);
+  if (!war || !player || war.endedAt || !war.belligerents[player] || drawing) return null;
+
+  const enemies = Object.keys(war.belligerents).filter((b) => b !== player && war.fronts.some((f) => f.belligerents.includes(b) && f.belligerents.includes(player)));
+  const enemy = enemyChoice && enemies.includes(enemyChoice) ? enemyChoice : enemies[0];
+  if (!enemy) return null;
+  const foe = countries[enemy];
+  const foeName = foe?.name ?? war.rebels?.[enemy]?.name ?? enemy;
+  const standing = peaceStanding(war, player, enemy, countries);
+  const usableDrawn = drawn && drawn.territory === enemy ? drawn : null;
+  const terms = { annexOccupied: annexOccupied && standing.mine > 0, annexWhole: annexWhole && standing.mine >= 0.8, cede: cede && standing.theirs > 0, drawnShare: usableDrawn?.share ?? 0, reparations };
+  const accepted = peaceAccepted(terms, standing);
+  const cost = peaceCost(terms, standing);
+  const close = () => set({ peaceWar: null, peaceDrawn: null });
+
+  const propose = async () => {
+    const r = await act({
+      type: "propose-peace", war: war.id, enemy, annexOccupied: terms.annexOccupied, annexWhole: terms.annexWhole, cede: terms.cede, reparations,
+      occupiedRing: standing.mineFront >= 0 ? frontRing(war.id, standing.mineFront) : undefined,
+      cededRing: standing.theirsFront >= 0 ? frontRing(war.id, standing.theirsFront) : undefined,
+      drawn: usableDrawn ? { ring: usableDrawn.ring, share: usableDrawn.share } : undefined,
+    });
+    if (r.ok) close();
+  };
+
+  return (
+    <div className="modal" onClick={close}>
+      <div className="card modal__body peace" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={`Peace deal, ${war.name}`}>
+        <div className="row"><h3 className="grow" style={{ fontSize: 18 }}>Peace deal: {war.name}</h3><button className="btn btn--sm" onClick={close}>Close</button></div>
+        {enemies.length > 1 && (
+          <label className="field"><span>Negotiating with</span>
+            <select className="select" value={enemy} onChange={(e) => { setEnemy(e.target.value); set({ peaceDrawn: null }); }}>
+              {enemies.map((b) => <option key={b} value={b}>{countries[b]?.name ?? war.rebels?.[b]?.name ?? b}</option>)}
+            </select>
+          </label>
+        )}
+        <div className="scroll grow" style={{ minHeight: 0 }}>
+          <Stat label={`You hold of ${foeName}`} value={`${(standing.mine * 100).toFixed(1)}%`} />
+          <Stat label={`${foeName} holds of you`} value={`${(standing.theirs * 100).toFixed(1)}%`} tone={standing.theirs > 0 ? "neg" : ""} />
+          <Stat label="Your exhaustion / theirs" value={`${Math.round(war.exhaustion[player] ?? 0)} / ${Math.round(war.exhaustion[enemy] ?? 0)}`} />
+
+          <div className="eyebrow" style={{ margin: "12px 0 6px" }}>Land</div>
+          {foe && <label className="check"><input type="checkbox" disabled={standing.mine <= 0} checked={terms.annexOccupied} onChange={(e) => setAnnexOccupied(e.target.checked)} /> Annex occupied territories ({(standing.mine * 100).toFixed(1)}%)</label>}
+          {foe && <label className="check"><input type="checkbox" disabled={standing.mine < 0.8} checked={terms.annexWhole} onChange={(e) => setAnnexWhole(e.target.checked)} /> Annex all of {foeName}{standing.mine < 0.8 ? " (needs 80% held)" : ""}</label>}
+          {foe && (
+            <div className="row row--wrap" style={{ gap: 6, margin: "6px 0" }}>
+              <button className="btn btn--sm" onClick={() => set({ peaceDrawing: enemy })}>{usableDrawn ? "Redraw land" : "Draw land on the map"}</button>
+              {usableDrawn && <span className="mono" style={{ fontSize: 12 }}>{(usableDrawn.share * 100).toFixed(1)}% of {foeName}</span>}
+              {usableDrawn && <button className="btn btn--sm" onClick={() => set({ peaceDrawn: null })}>Remove</button>}
+            </div>
+          )}
+          {foe && standing.theirs > 0 && <label className="check"><input type="checkbox" checked={terms.cede} onChange={(e) => setCede(e.target.checked)} /> Give up the land they hold ({(standing.theirs * 100).toFixed(1)}%)</label>}
+
+          <div className="eyebrow" style={{ margin: "12px 0 6px" }}>Reparations</div>
+          {foe ? (
+            <label className="slider">
+              <span className="row" style={{ justifyContent: "space-between", fontSize: 12 }}>
+                <span>{reparations > 0 ? `${foeName} pays you` : reparations < 0 ? `You pay ${foeName}` : "None"}</span>
+                <span className="mono">{reparations ? `$${credits(foe.economy.gdp * Math.abs(reparations))} · ${pct0(Math.abs(reparations))} of their GDP` : ""}</span>
+              </span>
+              <input type="range" min={-0.3} max={0.3} step={0.01} value={reparations} onChange={(e) => setReparations(Number(e.target.value))} />
+            </label>
+          ) : <div className="dim" style={{ fontSize: 12 }}>An insurgency has no treasury to pay from.</div>}
+        </div>
+        <div className="peace__verdict" style={{ borderColor: accepted ? "var(--positive)" : "var(--negative)" }}>
+          <strong className={accepted ? "pos" : "neg"}>{accepted ? `${foeName} would accept` : `${foeName} would refuse`}</strong>
+          <span className="dim mono" style={{ fontSize: 11 }}>You ask {cost.toFixed(0)} · your position supports {standing.leverage.toFixed(0)}</span>
+          <div className="dim" style={{ fontSize: 11 }}>Any land not named here goes back to its owner.</div>
+        </div>
+        <button className="btn btn--primary" style={{ justifyContent: "center", padding: "9px 12px", marginTop: 8, flex: "none" }} disabled={!accepted} onClick={() => void propose()}>Sign peace</button>
+      </div>
+    </div>
+  );
+}
+
 function StanceButtons({ war, player }: { war: War; player: string }) {
   const current = war.stance?.[player] ?? "balanced";
   return (
@@ -883,6 +973,7 @@ export function WarPanel({ wars, countries, onPick }: { wars: War[]; countries: 
           ))}
           <Stat label="Casualties" value={Math.round(Object.values(w.casualties).reduce((a, b) => a + b, 0)).toLocaleString("en-US")} />
           {player && w.belligerents[player] && <StanceButtons war={w} player={player} />}
+          {player && w.belligerents[player] && <button className="btn btn--sm btn--primary" style={{ marginTop: 6 }} onClick={() => useStore.getState().set({ peaceWar: w.id, peaceDrawn: null })}>Peace deal</button>}
         </div>
       ))}
       {ended.length > 0 && (

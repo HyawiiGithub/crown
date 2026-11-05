@@ -238,6 +238,39 @@ function nextPhase(war: War, exhaustion: number, decided: number): War["phase"] 
   return "war";
 }
 
+/** Hand over part of a country: the ground on the map, its people and its output. */
+export function transferLand(world: World, from: string, to: string, share: number, ring: [number, number][], name: string): void {
+  const a = world.countries[from];
+  const b = world.countries[to];
+  if (!a || !b || share <= 0 || ring.length < 3) return;
+  const part = clamp(share, 0, 0.98);
+  const moved = a.economy.gdp * part;
+  const pop = a.economy.population * part;
+  const shrink = 1 - part;
+  const grow = 1 + moved / Math.max(1, b.economy.gdp);
+  const scale = (c: Country, k: number) => {
+    const e = c.economy;
+    const m = e.macro;
+    m.potential *= k;
+    m.realGdp *= k;
+    m.capital *= k;
+    m.realHistory = m.realHistory.map((v) => v * k);
+    e.gdp *= k;
+    for (const s of e.sectors) {
+      s.quantity *= k;
+      s.capacity *= k;
+      s.output *= k;
+    }
+  };
+  scale(a, shrink);
+  scale(b, grow);
+  a.economy.population = Math.max(1000, a.economy.population - pop);
+  b.economy.population += pop;
+  a.economy.gdpPerCapita = a.economy.gdp / a.economy.population;
+  b.economy.gdpPerCapita = b.economy.gdp / b.economy.population;
+  world.regions.push({ id: `ceded-${from}-${to}-${world.dayCount}-${world.regions.length}`, name, owner: to, hosts: a.lands ?? [from], ring });
+}
+
 /** Bring a state into an existing war on a side. */
 export function joinWar(world: World, warId: string, joiner: string, side: string): void {
   const war = world.wars[warId];

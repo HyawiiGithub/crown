@@ -5,6 +5,7 @@ import type { Topology } from "topojson-specification";
 import type { Country, Front, MapRegion, War } from "../../shared/types";
 import { COUNTRY_BY_ISO3, TERRITORY_OWNER } from "../../data/countries";
 import { frontOccupation } from "../../sim/occupation";
+import { useStore } from "../store";
 import { makeScale, sampleRamp, type ScaleId, type Theme } from "../theme";
 
 /**
@@ -158,6 +159,7 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
         }
         if (!geo) return;
         const shape = frontShape(geo, o.share, cacheKey);
+        frontRings.set(`${w.id}:${i}`, shape.points.map((p) => projection.invert?.(p)).filter(Boolean) as [number, number][]);
         out.push({ key: `${w.id}-${i}`.replace(/[^a-zA-Z0-9-]/g, "-"), hosts: geo.hosts, area: shape.area, line: shape.line, holderName: o.holderName, territory: o.territory, holder: o.holder, share: o.share, ended: Boolean(w.endedAt) });
       });
     }
@@ -256,7 +258,33 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
   const fingers = useRef(new Map<number, { x: number; y: number }>());
   const pinchGap = useRef(0);
 
+  const drawingFor = useStore((s) => s.peaceDrawing);
+  const [draft, setDraft] = useState<[number, number][]>([]);
+  const mapPoint = (e: React.PointerEvent): [number, number] => {
+    const rect = wrapRef.current!.getBoundingClientRect();
+    return [(e.clientX - rect.left - transform.x) / transform.k, (e.clientY - rect.top - transform.y) / transform.k];
+  };
+  const finishDrawing = () => {
+    const territory = useStore.getState().peaceDrawing;
+    const pts = draft;
+    setDraft([]);
+    if (!territory) return;
+    const store = useStore.getState();
+    const share = raw && pts.length > 2 ? ringShare(raw, control, territory, pts, pathGen) : 0;
+    if (share < 0.002) {
+      store.toast("That outline doesn't cover their land. Try again.", "err");
+      return;
+    }
+    const stride = Math.max(1, Math.floor(pts.length / 80));
+    const ring = pts.filter((_, i) => i % stride === 0).map((p) => projection.invert?.(p)).filter(Boolean) as [number, number][];
+    store.set({ peaceDrawing: null, peaceDrawn: { ring, share, territory } });
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
+    if (drawingFor) {
+      setDraft([mapPoint(e)]);
+      return;
+    }
     fingers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (fingers.current.size === 2) {
       const [a, b] = [...fingers.current.values()];
@@ -267,6 +295,10 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
     drag.current = { x: e.clientX, y: e.clientY, tx: transform.x, ty: transform.y, moved: false };
   };
   const onPointerMove = (e: React.PointerEvent) => {
+    if (drawingFor) {
+      if (e.buttons !== 0 && draft.length) setDraft((d) => [...d, mapPoint(e)]);
+      return;
+    }
     if (fingers.current.has(e.pointerId)) fingers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (fingers.current.size >= 2) {
       const [a, b] = [...fingers.current.values()];
@@ -283,6 +315,10 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
     if (drag.current.moved) setTransform((t) => ({ ...t, x: drag.current!.tx + dx, y: drag.current!.ty + dy }));
   };
   const endDrag = (e: React.PointerEvent) => {
+    if (drawingFor) {
+      if (draft.length) finishDrawing();
+      return;
+    }
     fingers.current.delete(e.pointerId);
     if (fingers.current.size === 1) {
       // Carry on panning with the finger that stayed down, without a jump.
@@ -388,6 +424,8 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
             );
           })}
 
+          {draft.length > 1 && <path d={`M${draft.map((p) => p.join(",")).join("L")}Z`} fill="#f59e0b" fillOpacity={0.35} stroke="#f59e0b" strokeWidth={2} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />}
+
           {/* Outlines for the player's country and the selection, every polygon they own. */}
           {drawn.map((f, i) => {
             const id = control[f.key];
@@ -414,7 +452,14 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
         {fronts.length > 0 && <div className="map-legend row" style={{ gap: 6, marginTop: 4 }}><span style={{ width: 16, height: 2, background: "#ef4444", display: "inline-block" }} /><span className="dim">Frontline</span></div>}
       </div>
 
-      <div className="map-controls">
+      {drawingFor && (
+        <div className="draw-banner card">
+          <span className="grow">Draw around the land you want from {countries[drawingFor]?.name}. Zoom first with + and &minus;.</span>
+          <button className="btn btn--sm" onPointerDown={(e) => e.stopPropagation()} onClick={() => useStore.getState().set({ peaceDrawing: null })}>Cancel</button>
+        </div>
+      )}
+
+      <div className="map-controls" onPointerDown={(e) => e.stopPropagation()}>
         <button className="btn btn--sm" onClick={() => applyZoom(1.5, size.w / 2, size.h / 2)} title="Zoom in">+</button>
         <button className="btn btn--sm" onClick={() => applyZoom(1 / 1.5, size.w / 2, size.h / 2)} title="Zoom out">&minus;</button>
         <button className="btn btn--sm" onClick={() => setTransform({ k: 1, x: 0, y: 0 })} title="Reset view">Reset</button>
@@ -432,6 +477,38 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
       )}
     </div>
   );
+}
+
+/** Occupied land as lon/lat outlines, for peace deals to hand over. */
+const frontRings = new Map<string, [number, number][]>();
+export function frontRing(warId: string, frontIndex: number): [number, number][] | undefined {
+  return frontRings.get(`${warId}:${frontIndex}`);
+}
+
+/** How much of a country's land a hand-drawn outline covers, 0..1. */
+function ringShare(raw: RawFeature[], control: Record<string, string>, territory: string, outline: [number, number][], gen: GeoPath): number {
+  sampler ??= document.createElement("canvas").getContext("2d");
+  if (!sampler) return 0;
+  const drawn = new Path2D(`M${outline.map((p) => p.join(",")).join("L")}Z`);
+  let inside = 0;
+  let total = 0;
+  for (const f of raw) {
+    if (control[featureKey(f)] !== territory) continue;
+    const poly = largestPolygon(f, gen);
+    if (!poly) continue;
+    const shape = { type: "Polygon", coordinates: poly } as never;
+    const land = new Path2D(gen(shape) ?? "");
+    const [[x0, y0], [x1, y1]] = gen.bounds(shape);
+    const step = Math.max((x1 - x0) / 60, (y1 - y0) / 60, 0.05);
+    for (let x = x0; x <= x1; x += step) {
+      for (let y = y0; y <= y1; y += step) {
+        if (!sampler.isPointInPath(land, x, y)) continue;
+        total++;
+        if (sampler.isPointInPath(drawn, x, y)) inside++;
+      }
+    }
+  }
+  return total ? inside / total : 0;
 }
 
 interface FrontGeometry {
@@ -516,7 +593,7 @@ function buildFrontGeometry(raw: RawFeature[], control: Record<string, string>, 
 }
 
 /** The held ground, and the line in front of it, for a given share of the land. */
-function frontShape(g: FrontGeometry, share: number, seedText: string): { area: string; line: string } {
+function frontShape(g: FrontGeometry, share: number, seedText: string): { area: string; line: string; points: [number, number][] } {
   let seed = 0;
   for (let i = 0; i < seedText.length; i++) seed = (seed * 31 + seedText.charCodeAt(i)) % 1000;
   const n = g.depths.length;
@@ -532,11 +609,12 @@ function frontShape(g: FrontGeometry, share: number, seedText: string): { area: 
     pts.push([g.origin[0] + g.u[0] * t + g.v[0] * s, g.origin[1] + g.u[1] * t + g.v[1] * s]);
   }
   const line = `M${pts.map((p) => `${p[0].toFixed(2)},${p[1].toFixed(2)}`).join("L")}`;
-  const back = g.depths[0] - spread - 20;
+  const back = g.depths[0] - spread * 0.1 - 6;
   const end = pts[pts.length - 1];
   const start = pts[0];
   const corner = (p: [number, number]) => [p[0] + g.u[0] * (back - depth), p[1] + g.u[1] * (back - depth)].map((x) => x.toFixed(2)).join(",");
-  return { line, area: `${line}L${corner(end)}L${corner(start)}Z` };
+  const toPoint = (p: [number, number]): [number, number] => [p[0] + g.u[0] * (back - depth), p[1] + g.u[1] * (back - depth)];
+  return { line, area: `${line}L${corner(end)}L${corner(start)}Z`, points: [...pts, toPoint(end), toPoint(start)] };
 }
 
 function clampNum(v: number, lo: number, hi: number): number {

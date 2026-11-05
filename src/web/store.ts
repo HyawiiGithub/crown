@@ -115,6 +115,11 @@ interface Store {
   leftTab: string;
   rightTab: string;
   devOpen: boolean;
+  /** War the peace screen is open for. */
+  peaceWar: string | null;
+  /** Country whose land is being marked on the map right now. */
+  peaceDrawing: string | null;
+  peaceDrawn: { ring: [number, number][]; share: number; territory: string } | null;
   notice: { text: string; kind: "ok" | "err" } | null;
 
   set: (p: Partial<Store>) => void;
@@ -156,6 +161,9 @@ const worldInitial = {
   leftTab: "ticker",
   rightTab: "government",
   devOpen: false,
+  peaceWar: null as string | null,
+  peaceDrawing: null as string | null,
+  peaceDrawn: null as { ring: [number, number][]; share: number; territory: string } | null,
 };
 
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
