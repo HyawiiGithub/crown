@@ -426,3 +426,25 @@ html, body { position: fixed; inset: 0; width: 100%; overflow: hidden; }
 
 .rail-right .tabs { flex-wrap: wrap; overflow: visible; }
 .rail-right .tab { padding-left: 8px; padding-right: 8px; }
+
+/* ===========================================================================
+   Panels fit their rail: numbers always show, long names get cut.
+   =========================================================================== */
+.app { grid-template-columns: clamp(220px, 21vw, 300px) minmax(0, 1fr) clamp(300px, 31vw, 430px); }
+.rail-left, .rail-right, .stage { min-width: 0; }
+.table { width: 100%; }
+.table td, .table th { white-space: nowrap; }
+.table td:first-child { width: 100%; max-width: 0; }
+.table td:not(:first-child):not(.right) { max-width: 76px; }
+.table td .truncate { display: block; min-width: 0; }
+.table td .row { min-width: 0; flex-wrap: nowrap; }
+.table td .row > * { min-width: 0; }
+.table td .row > img, .table td .row > [aria-hidden], .table td .row > .badge { flex: none; }
+.stat { min-width: 0; }
+.stat__value { min-width: 0; text-align: right; overflow-wrap: anywhere; }
+.masthead > * { flex: none; }
+.masthead > .masthead__spacer { flex: 1; min-width: 0; }
+.masthead > .masthead__stats { flex: 0 1 auto; min-width: 0; }
+@media (max-width: 1250px) { .masthead__stats { display: none; } }
+@media (max-width: 1000px) { .masthead__title { display: none; } }
+.table td .btn--sm { padding: 2px 5px; }
