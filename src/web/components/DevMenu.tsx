@@ -83,7 +83,7 @@ export function DevMenu(props: Props) {
           </div>
         ))}
         <div style={{ padding: 14 }}>
-          <button className="btn btn--sm" style={{ width: "100%" }} onClick={props.onClose}>Close &mdash; Esc</button>
+          <button className="btn btn--sm" style={{ width: "100%" }} onClick={props.onClose}>Close (Esc)</button>
         </div>
       </nav>
 
@@ -915,11 +915,11 @@ function Rules({ run, directives }: { run: (op: Record<string, unknown>) => Prom
           <label className="field"><span>Interval (seconds)</span><input className="input mono" defaultValue="3600" id="rule-interval" /></label>
         </div>
         <label className="field">
-          <span>Trigger condition &mdash; a path, an operator and a value. One rule per line, use <code>;</code> for AND.</span>
+          <span>Trigger condition: a path, an operator and a value. One rule per line, use <code>;</code> for AND.</span>
           <input className="input mono" placeholder="economy.gdpGrowth &lt; -0.05" id="rule-condition" />
         </label>
         <label className="field">
-          <span>Actions &mdash; console commands executed when the condition holds.</span>
+          <span>Actions: console commands executed when the condition holds.</span>
           <textarea className="textarea" rows={4} value={code} onChange={(e) => setCode(e.target.value)} placeholder="grant(USA, 1e11)&#10;log(Released emergency funds)" />
         </label>
         <button className="btn btn--sm btn--primary" onClick={() => {
