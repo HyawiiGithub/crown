@@ -172,6 +172,41 @@ const pc = (v: number) => `${(v * 100).toFixed(1)}%`;
   check("giving up land and paying buys peace", ceded.ok, ceded.message);
 }
 
+// Wars behave, and one game does not leak into the next.
+{
+  const first = game("2026", "USA");
+  first.engine.advanceDays(365);
+  const fresh = game("2026", "USA");
+  const w = Object.values(fresh.world.wars).find((x) => x.belligerents.UKR)!;
+  check("a new game starts with clean war figures", w.exhaustion.UKR === 62 && Object.keys(w.casualties).length === 0, `exhaustion ${w.exhaustion.UKR}`);
+
+  const g = game("1950", "USS");
+  g.engine.advanceDays(30);
+  g.cmd({ type: "declare-war", target: "TUR", cause: "test" });
+  const war = Object.values(g.world.wars).find((x) => x.belligerents.USS && x.belligerents.TUR)!;
+  g.engine.advanceDays(30);
+  check("an invasion has casualties on both sides", (war.casualties.USS ?? 0) > 0 && (war.casualties.TUR ?? 0) > 0, `USS ${Math.round(war.casualties.USS ?? 0)} TUR ${Math.round(war.casualties.TUR ?? 0)}`);
+  check("the giant loses fewer men than the small army", (war.casualties.USS ?? 0) < (war.casualties.TUR ?? 0));
+  check("the giant advances", war.fronts[0].control > 0, `control ${war.fronts[0].control.toFixed(1)}`);
+
+  const n = game("1990", "USS");
+  n.engine.advanceDays(10);
+  n.cmd({ type: "declare-war", target: "TUR", cause: "test" });
+  const nato = Object.values(n.world.wars).find((x) => x.belligerents.USS && x.belligerents.TUR)!;
+  check("distant allies back a side without their own front", nato.fronts.every((f) => !f.belligerents.includes("CAN") && !f.belligerents.includes("PRT")), `${nato.fronts.length} fronts`);
+
+  // An army with no morale left still fights and bleeds, it doesn't just vanish.
+  const b = game("1950", "USS");
+  b.engine.advanceDays(30);
+  b.cmd({ type: "declare-war", target: "TUR", cause: "test" });
+  const broken = Object.values(b.world.wars).find((x) => x.belligerents.USS && x.belligerents.TUR)!;
+  b.c.military.morale = 0;
+  b.c.military.readiness = 0;
+  b.engine.advanceDays(30);
+  check("a broken army still takes and inflicts casualties", (broken.casualties.USS ?? 0) > 0 && (broken.casualties.TUR ?? 0) > 0);
+  check("morale recovers", b.c.military.morale > 0);
+}
+
 // A saved game continues identically.
 {
   const g = game("2026", "USA");

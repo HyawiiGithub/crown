@@ -803,8 +803,9 @@ export function buildWorld(scenario: Scenario, name: string, id: string, now: nu
       belligerents,
       cause: w.cause,
       fronts: w.fronts.map((f, i) => ({ ...f, ...FRONT_GEO[w.name], id: `front-${i}`, contestedOutput: 0, openedAt: 0, attritionRate: 0.0004 })),
-      exhaustion: w.exhaustion ?? {},
-      casualties: w.casualties ?? {},
+      // Copies: the seed tables must not carry one game's losses into the next.
+      exhaustion: { ...w.exhaustion },
+      casualties: { ...w.casualties },
       materiel: {},
       warGoal: w.warGoal ?? "",
       publicSupport: Object.fromEntries(Object.keys(belligerents).map((k) => [k, rnd.float(40, 70)])),

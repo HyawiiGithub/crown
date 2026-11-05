@@ -114,6 +114,17 @@ export function stepWars(world: World, rnd: Rng, dt: number): void {
     if (war.endedAt) continue;
     const P = world.params;
 
+    // How many fronts each side is spread across, so one army isn't counted on all of them.
+    const frontCount: Record<string, number> = {};
+    for (const f of war.fronts) for (const b of f.belligerents) frontCount[b] = (frontCount[b] ?? 0) + 1;
+    const days = dt / 86400;
+    for (const b of Object.keys(war.belligerents)) {
+      const m = world.countries[b]?.military;
+      if (!m) continue;
+      m.morale = clamp(m.morale + (m.morale < 70 ? 0.015 : 0) * days, 0, 100);
+      m.readiness = clamp(m.readiness + (m.readiness < 70 ? 0.015 : 0) * days, 0, 100);
+    }
+
     // Total war strength per belligerent, including allies.
     const strength: Record<string, number> = {};
     for (const b of Object.keys(war.belligerents)) {
@@ -130,8 +141,9 @@ export function stepWars(world: World, rnd: Rng, dt: number): void {
       const perSoldier = c.economy.fiscal.military / Math.max(1, c.military.activeDuty);
       const worldPc = world.globals.globalGdp / Math.max(1, world.globals.globalPopulation);
       const equipment = clamp(Math.pow(perSoldier / Math.max(1e-6, worldPc * 4), 0.25), 0.55, 1.8);
-      const own = c.military.activeDuty * (0.4 + c.military.readiness / 100) * (c.military.morale / 100) * equipment;
-      strength[b] = own + allyPower * 0.8;
+      const own = c.military.activeDuty * (0.4 + Math.max(15, c.military.readiness) / 100) * (Math.max(15, c.military.morale) / 100) * equipment;
+      // Friends overseas send aid and expeditions, not their whole army.
+      strength[b] = own + allyPower * 0.3;
     }
 
     for (const front of war.fronts) {
@@ -152,24 +164,37 @@ export function stepWars(world: World, rnd: Rng, dt: number): void {
       const mult = terrainDefence[front.terrain] ?? 1;
       const ratio = attacker / Math.max(1, defender * mult);
 
-      // Attrition: both sides bleed, faster when the front is hot.
-      const intensity = clamp(Math.log2(ratio + 1) / 3, 0, 2);
-      const attacking = front.belligerents.some((b) => war.stance?.[b] === "offensive");
-      const casualtyRate = P.warDamage * intensity * (dt / 86400) * 0.6 * (attacking ? 1.5 : 1);
-      for (const b of front.belligerents) {
+      // Attrition. Only the troops that can reach each other fight, so a huge army does not
+      // lose men in proportion to its size, and the weaker side takes the worse of it.
+      const fullForce = (b: string) => {
         const c = world.countries[b];
-        const rebels = war.rebels?.[b];
-        if (!c && !rebels) continue;
-        const force = c ? c.military.activeDuty + c.military.reserves * 0.1 : rebels!.strength;
-        war.casualties[b] = (war.casualties[b] ?? 0) + force * casualtyRate;
+        return c ? c.military.activeDuty + c.military.reserves * 0.1 : war.rebels?.[b]?.strength ?? 0;
+      };
+      const [firstSide, secondSide] = front.belligerents;
+      const engaged = Math.min(fullForce(firstSide) / Math.max(1, frontCount[firstSide] ?? 1), fullForce(secondSide) / Math.max(1, frontCount[secondSide] ?? 1));
+      const lopsided = Math.abs(Math.log2(Math.max(1e-6, ratio)));
+      const intensity = clamp(0.7 + lopsided * 0.1, 0.5, 1.3);
+      const attacking = front.belligerents.some((b) => war.stance?.[b] === "offensive");
+      const lossRate = P.warDamage * intensity * days * 0.6 * (attacking ? 1.5 : 1);
+      const firstStrength = attacker;
+      const secondStrength = defender * mult;
+      const totalEffective = Math.max(1, firstStrength + secondStrength);
+      front.belligerents.forEach((b, side) => {
+        const force = fullForce(b);
+        if (force <= 0) return;
+        const hitShare = (side === 0 ? secondStrength : firstStrength) / totalEffective;
+        const loss = engaged * lossRate * 2 * hitShare;
+        const fraction = loss / force;
+        war.casualties[b] = (war.casualties[b] ?? 0) + loss;
+        const c = world.countries[b];
         if (c) {
-          c.military.morale = clamp(c.military.morale - casualtyRate * 120, 0, 100);
-          c.military.readiness = clamp(c.military.readiness - casualtyRate * 90, 0, 100);
-          c.military.activeDuty = Math.max(100, c.military.activeDuty - force * casualtyRate * 0.3);
+          c.military.morale = clamp(c.military.morale - fraction * 120, 0, 100);
+          c.military.readiness = clamp(c.military.readiness - fraction * 90, 0, 100);
+          c.military.activeDuty = Math.max(100, c.military.activeDuty - loss * 0.6);
         }
-        war.exhaustion[b] = clamp((war.exhaustion[b] ?? 0) + casualtyRate * 90, 0, 100);
-        war.publicSupport[b] = clamp((war.publicSupport[b] ?? 50) - casualtyRate * 120, 0, 100);
-      }
+        war.exhaustion[b] = clamp((war.exhaustion[b] ?? 0) + fraction * 80, 0, 100);
+        war.publicSupport[b] = clamp((war.publicSupport[b] ?? 50) - fraction * 120, 0, 100);
+      });
 
       // Movement.
       // Fronts grind. Even a clear edge takes years, faster on open ground and with orders to attack.
@@ -193,13 +218,15 @@ export function stepWars(world: World, rnd: Rng, dt: number): void {
     }
 
     // Mobilisation and phase.
-    const avgExhaustion = Object.keys(war.belligerents).length
-      ? Object.keys(war.belligerents).reduce((a, b) => a + (war.exhaustion[b] ?? 0), 0) / Object.keys(war.belligerents).length
-      : 0;
+    const fighting = Object.keys(frontCount);
+    const avgExhaustion = fighting.length ? fighting.reduce((a, b) => a + (war.exhaustion[b] ?? 0), 0) / fighting.length : 0;
     const decidedFronts = war.fronts.filter((f) => Math.abs(f.control) > 85);
     war.phase = nextPhase(war, avgExhaustion, decidedFronts.length);
 
-    if (avgExhaustion > 82 || war.fronts.every((f) => Math.abs(f.control) > 96)) {
+    // A spent AI state sues for peace. The player decides for themselves.
+    const collapsed = fighting.some((b) => b !== world.playerCountry && (war.exhaustion[b] ?? 0) >= 100);
+    const playerInvolved = Boolean(world.playerCountry && war.belligerents[world.playerCountry]);
+    if (!playerInvolved && (avgExhaustion > 82 || collapsed || war.fronts.every((f) => Math.abs(f.control) > 96))) {
       concludeWar(world, war, rnd);
     }
   }
@@ -286,7 +313,16 @@ export function joinWar(world: World, warId: string, joiner: string, side: strin
     c.relations[o] = clamp((c.relations[o] ?? 0) - 50, -100, 100);
     if (world.countries[o]) world.countries[o].relations[joiner] = clamp((world.countries[o].relations[joiner] ?? 0) - 50, -100, 100);
   }
-  war.fronts.push({ id: `${warId}-f${war.fronts.length}`, name: `${c.name} Front`, belligerents: [joiner, opposed[0] ?? war.fronts[0].belligerents[1]], control: 0, contestedOutput: 0, openedAt: world.t, terrain: "plains", attritionRate: 0.0004 });
+  const distanceTo = (id: string) => {
+    const o = world.countries[id];
+    return o ? Math.hypot((c.lat ?? 0) - (o.lat ?? 0), (c.lon ?? 0) - (o.lon ?? 0)) : Infinity;
+  };
+  const nearest = [...opposed].sort((a, b) => distanceTo(a) - distanceTo(b))[0];
+  if (nearest && distanceTo(nearest) <= 30) {
+    war.fronts.push({ id: `${warId}-f${war.fronts.length}`, name: `${c.name} Front`, belligerents: [joiner, nearest], control: 0, contestedOutput: 0, openedAt: world.t, terrain: "plains", attritionRate: 0.0004 });
+  } else if (war.belligerents[side] && !war.belligerents[side].includes(joiner)) {
+    war.belligerents[side].push(joiner);
+  }
   pushEvent(world, { kind: "military", severity: "catastrophic", country: joiner, title: `${c.name} enters the ${war.name}`, body: `${c.name} joins the fighting alongside ${world.countries[side]?.name ?? side}.`, actors: [joiner, side], tags: ["war"] });
 }
 

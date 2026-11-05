@@ -857,7 +857,8 @@ export function PeaceDeal() {
   const war = wars.find((w) => w.id === warId);
   if (!war || !player || war.endedAt || !war.belligerents[player] || drawing) return null;
 
-  const enemies = Object.keys(war.belligerents).filter((b) => b !== player && war.fronts.some((f) => f.belligerents.includes(b) && f.belligerents.includes(player)));
+  const facing = Object.keys(war.belligerents).filter((b) => b !== player && war.fronts.some((f) => f.belligerents.includes(b) && f.belligerents.includes(player)));
+  const enemies = facing.length ? facing : Object.keys(war.belligerents).filter((b) => b !== player && !(war.belligerents[player] ?? []).includes(b) && !(war.belligerents[b] ?? []).includes(player));
   const enemy = enemyChoice && enemies.includes(enemyChoice) ? enemyChoice : enemies[0];
   if (!enemy) return null;
   const foe = countries[enemy];
