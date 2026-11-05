@@ -25,10 +25,7 @@ export function stepDiplomacy(world: World, rnd: Rng, dt: number): void {
     // Only drift toward the strongest handful of relationships each tick, both
     // for correctness and because touching 197^2 pairs every two seconds is
     // more work than it is worth.
-    const neighbours = Object.keys(ca.relations)
-      .map((b) => ({ b, v: Math.abs(ca.relations[b]) }))
-      .sort((x, y) => y.v - x.v)
-      .slice(0, 24);
+    const neighbours = [...ca.economy.trade.exportPartners, ...ca.alliances].slice(0, 24).map((b) => ({ b }));
 
     for (const { b } of neighbours) {
       if (b === a || !world.countries[b]) continue;
@@ -55,13 +52,13 @@ export function stepDiplomacy(world: World, rnd: Rng, dt: number): void {
       // Creeping memory.
       drift += rnd.normal() * 0.08;
 
-      ca.relations[b] = clamp(ca.relations[b] + drift * (dt / SECONDS_PER_YEAR) * 12 * 0.25 + drift * 0.002, -100, 100);
+      ca.relations[b] = clamp((ca.relations[b] ?? 0) + drift * (dt / SECONDS_PER_YEAR) * 3, -100, 100);
     }
 
     // Unilateral embargoes form when relations are bad enough and power aligns.
-    if (!ca.overlord && rnd.chance(0.000018 * world.params.eventRate * (dt / 86400) * 60)) {
+    if (!ca.overlord && a !== world.playerCountry && rnd.chance(0.0000005 * world.params.eventRate * (dt / 86400) * 60)) {
       const target = Object.entries(ca.relations)
-        .filter(([b]) => !ca.alliances.includes(b))
+        .filter(([b]) => !ca.alliances.includes(b) && b !== world.playerCountry)
         .sort((x, y) => x[1] - y[1])[0];
       if (target && target[1] < -55) {
         imposeSanction(world, a, target[0], "financial", rnd);
@@ -69,7 +66,7 @@ export function stepDiplomacy(world: World, rnd: Rng, dt: number): void {
     }
 
     // Alliance offers to states we like and who do not already have one.
-    if (!ca.alliances.length && rnd.chance(0.000008 * world.params.eventRate * (dt / 86400) * 60)) {
+    if (a !== world.playerCountry && !ca.alliances.length && rnd.chance(0.0000005 * world.params.eventRate * (dt / 86400) * 60)) {
       const friend = Object.entries(ca.relations).sort((x, y) => y[1] - x[1])[0];
       if (friend && friend[1] > 70) {
         signTreaty(world, "alliance", [a, friend[0]], ["Mutual defence"], rnd, ca.economy.gdp * 0.002);
@@ -100,7 +97,7 @@ export function stepDiplomacy(world: World, rnd: Rng, dt: number): void {
   // Sanction evasion: pressure decays if the target resists.
   for (const s of Object.values(world.sanctions)) {
     if (world.t > s.until) {
-      s.until = 0;
+      liftSanction(world, s.id);
       continue;
     }
     s.evasion = clamp01(s.evasion + 0.0008 * (dt / SECONDS_PER_YEAR) * 12 + 0.00001);
@@ -120,8 +117,13 @@ export function stepWars(world: World, rnd: Rng, dt: number): void {
     const strength: Record<string, number> = {};
     for (const b of Object.keys(war.belligerents)) {
       const c = world.countries[b];
-      if (!c) continue;
       const allies = war.belligerents[b] ?? [];
+      const rebels = war.rebels?.[b];
+      if (rebels) {
+        strength[b] = rebels.strength + allies.reduce((a, al) => a + (world.countries[al]?.military.activeDuty ?? 0) * 0.2, 0);
+        continue;
+      }
+      if (!c) continue;
       const allyPower = allies.reduce((a, al) => a + (world.countries[al]?.military.activeDuty ?? 0) * (world.countries[al]?.military.readiness ?? 0) / 100, 0);
       const own = c.military.activeDuty * (0.4 + c.military.readiness / 100) * (c.military.morale / 100);
       strength[b] = own + allyPower * 0.8;
@@ -147,27 +149,30 @@ export function stepWars(world: World, rnd: Rng, dt: number): void {
 
       // Attrition: both sides bleed, faster when the front is hot.
       const intensity = clamp(Math.log2(ratio + 1) / 3, 0, 2);
-      const casualtyRate = P.warDamage * intensity * world.daysPerSecond * (dt / 86400) * 8;
+      const casualtyRate = P.warDamage * intensity * (dt / 86400) * 0.6;
       for (const b of front.belligerents) {
         const c = world.countries[b];
-        if (!c) continue;
-        war.casualties[b] = (war.casualties[b] ?? 0) + (c.military.activeDuty + c.military.reserves * 0.1) * casualtyRate;
-        c.military.morale = clamp(c.military.morale - casualtyRate * 900, 0, 100);
-        c.military.readiness = clamp(c.military.readiness - casualtyRate * 700, 0, 100);
-        war.exhaustion[b] = clamp((war.exhaustion[b] ?? 0) + casualtyRate * 2400, 0, 100);
-        war.publicSupport[b] = clamp((war.publicSupport[b] ?? 50) - casualtyRate * 1500, 0, 100);
+        const rebels = war.rebels?.[b];
+        if (!c && !rebels) continue;
+        const force = c ? c.military.activeDuty + c.military.reserves * 0.1 : rebels!.strength;
+        war.casualties[b] = (war.casualties[b] ?? 0) + force * casualtyRate;
+        if (c) {
+          c.military.morale = clamp(c.military.morale - casualtyRate * 120, 0, 100);
+          c.military.readiness = clamp(c.military.readiness - casualtyRate * 90, 0, 100);
+          c.military.activeDuty = Math.max(100, c.military.activeDuty - force * casualtyRate * 0.3);
+        }
+        war.exhaustion[b] = clamp((war.exhaustion[b] ?? 0) + casualtyRate * 200, 0, 100);
+        war.publicSupport[b] = clamp((war.publicSupport[b] ?? 50) - casualtyRate * 120, 0, 100);
       }
 
       // Movement.
-      const push = clamp((ratio - 1) * 0.9, -1.6, 1.6) * (dt / (SECONDS_PER_YEAR * 0.06));
-      front.control = clamp(front.control + push * 100, -100, 100);
+      const push = clamp(Math.log(Math.max(0.05, ratio)) * 0.5, -1, 1) * (dt / (SECONDS_PER_YEAR * 1.2));
+      front.control = clamp(front.control + push * 100 + rnd.normal() * 0.15, -100, 100);
 
       const owner = world.countries[front.belligerents[1]];
       if (owner) {
         const exposure = Math.min(1, Math.abs(front.control) / 100);
         front.contestedOutput = owner.economy.gdp * exposure * 0.22;
-        // The occupied region stops producing at full rate.
-        owner.economy.gdp = Math.max(1e6, owner.economy.gdp * (1 - exposure * 0.02 * (dt / SECONDS_PER_YEAR) * 12));
       }
     }
 
@@ -199,13 +204,36 @@ function nextPhase(war: War, exhaustion: number, decided: number): War["phase"] 
   return "war";
 }
 
+/** Bring a state into an existing war on a side. */
+export function joinWar(world: World, warId: string, joiner: string, side: string): void {
+  const war = world.wars[warId];
+  const c = world.countries[joiner];
+  // Nobody drags the player into a war; that stays the player's decision.
+  if (!war || !c || war.endedAt || war.belligerents[joiner] || joiner === world.playerCountry) return;
+  war.belligerents[joiner] = [];
+  war.exhaustion[joiner] = 2;
+  war.publicSupport[joiner] = 62;
+  if (!c.wars.includes(warId)) c.wars.push(warId);
+  const opposed = Object.keys(war.belligerents).filter((b) => b !== joiner && b !== side && !areAllied(world, b, side));
+  for (const o of opposed) {
+    c.relations[o] = clamp((c.relations[o] ?? 0) - 50, -100, 100);
+    if (world.countries[o]) world.countries[o].relations[joiner] = clamp((world.countries[o].relations[joiner] ?? 0) - 50, -100, 100);
+  }
+  war.fronts.push({ id: `${warId}-f${war.fronts.length}`, name: `${c.name} Front`, belligerents: [joiner, opposed[0] ?? war.fronts[0].belligerents[1]], control: 0, contestedOutput: 0, openedAt: world.t, terrain: "plains", attritionRate: 0.0004 });
+  pushEvent(world, { kind: "military", severity: "catastrophic", country: joiner, title: `${c.name} enters the ${war.name}`, body: `${c.name} joins the fighting alongside ${world.countries[side]?.name ?? side}.`, actors: [joiner, side], tags: ["war"] });
+}
+
+function areAllied(world: World, a: string, b: string): boolean {
+  return Boolean(world.countries[a]?.alliances.includes(b));
+}
+
 export function declareWar(world: World, attacker: string, defender: string, cause: string, byUserId?: string): War | null {
   const a = world.countries[attacker];
   const d = world.countries[defender];
   if (!a || !d || attacker === defender) return null;
   if (a.wars.some((id) => world.wars[id]?.belligerents[defender])) return null;
 
-  const id = `war-${world.wars.length}-${Math.round(world.t)}`;
+  const id = `war-${Object.keys(world.wars).length}-${Math.round(world.t)}`;
   const war: War = {
     id,
     name: `${a.name} - ${d.name} War`,
@@ -226,20 +254,14 @@ export function declareWar(world: World, attacker: string, defender: string, cau
   a.relations[defender] = clamp((a.relations[defender] ?? 0) - 70, -100, 100);
   d.relations[attacker] = clamp((d.relations[attacker] ?? 0) - 70, -100, 100);
 
-  // Guarantee clauses: an alliance partner of the defender joins in.
+  // Guarantee clauses: the defender's treaty partners come to its aid. The player's
+  // own country is left to decide for itself.
   for (const t of Object.values(world.treaties)) {
     if (!t.active || (t.kind !== "alliance" && t.kind !== "defensive-pact")) continue;
-    if (t.parties.includes(defender) && !t.parties.includes(attacker) && !t.parties.some((p) => war.belligerents[attacker]?.includes(p))) {
-      for (const p of t.parties) {
-        if (p === attacker || p === defender) continue;
-        if (war.belligerents[p]) continue;
-        if (world.countries[p]) {
-          war.belligerents[p] = [];
-          world.countries[p].wars.push(id);
-          pushEvent(world, { kind: "diplomatic", severity: "major", title: `${world.countries[p].name} joins the war`, body: `Invoked under the terms of the ${t.name}.`, actors: [p], tags: ["war", "alliance"] });
-        }
-      }
-      break;
+    if (!t.parties.includes(defender) || t.parties.includes(attacker)) continue;
+    for (const p of t.parties) {
+      if (p === defender || p === world.playerCountry || !world.countries[p] || war.belligerents[p]) continue;
+      joinWar(world, id, p, defender);
     }
   }
 
@@ -259,6 +281,7 @@ export function declareWar(world: World, attacker: string, defender: string, cau
 function concludeWar(world: World, war: War, rnd: Rng): void {
   const sides = Object.keys(war.belligerents);
   const score: Record<string, number> = {};
+  void rnd;
   for (const s of sides) {
     const own = war.fronts.reduce((acc, f) => acc + (f.belligerents[0] === s ? f.control : -f.control), 0) / Math.max(1, war.fronts.length);
     score[s] = own - (war.exhaustion[s] ?? 0) / 2;
@@ -277,10 +300,7 @@ function concludeWar(world: World, war: War, rnd: Rng): void {
   const lc = world.countries[loser];
   const terms: string[] = [];
 
-  if (margin > 45 && wc && lc && wc.economy.gdp > lc.economy.gdp * 0.35 && rnd.chance(0.55)) {
-    // Annexation. The loser's economy is folded into the winner's, its
-    // legislature is dissolved, and it survives as a banned, playable-irrelevant
-    // remnant until a dev intervenes.
+  if (margin > 60 && wc && lc && wc.economy.gdp > lc.economy.gdp * 0.6 && lc.id !== world.playerCountry && rnd.chance(0.5)) {
     annex(world, winner, loser, "Territorial concession at the end of the war");
     terms.push(`${lc?.name} is annexed in its entirety`);
   } else if (wc && lc) {
@@ -319,11 +339,19 @@ export function annex(world: World, annexer: string, target: string, cause: stri
   const t = world.countries[target];
   if (!a || !t || a.id === t.id || t.annexedBy) return;
 
+  const growBy = t.economy.gdp / Math.max(1, a.economy.gdp);
   a.economy.gdp += t.economy.gdp;
   a.economy.population += t.economy.population;
   a.economy.fiscal.debt += t.economy.fiscal.debt;
   a.economy.reserves += t.economy.reserves;
   a.economy.gdpPerCapita = a.economy.gdp / a.economy.population;
+  a.economy.macro.potential *= 1 + growBy;
+  a.economy.macro.realGdp *= 1 + growBy;
+  a.economy.macro.capital *= 1 + growBy;
+  a.economy.macro.realHistory = a.economy.macro.realHistory.map((v) => v * (1 + growBy));
+  for (const s of a.economy.sectors) { s.quantity *= 1 + growBy; s.capacity *= 1 + growBy; }
+  for (const k of Object.keys(world.control)) if (world.control[k] === target) world.control[k] = annexer;
+  for (const r of world.regions) if (r.owner === target) r.owner = annexer;
   a.military.activeDuty += t.military.activeDuty;
   a.military.spend += t.military.spend;
   for (const [k, v] of Object.entries(t.economy.trade.flows)) a.economy.trade.flows[k] = (a.economy.trade.flows[k] ?? 0) + v;
@@ -345,9 +373,12 @@ export function annex(world: World, annexer: string, target: string, cause: stri
     delete world.parties[p.id];
   }
 
+  for (const wid of t.wars) {
+    const w = world.wars[wid];
+    if (w && !w.endedAt && Object.keys(w.belligerents).filter((b) => b !== target).length < 2) w.endedAt = world.t;
+  }
+  t.wars = [];
   t.annexedBy = annexer;
-  t.dependencies = { ...t.dependencies, [annexer]: "occupation" };
-  a.dependencies[target] = "occupation";
 
   pushEvent(world, {
     kind: "political",
@@ -368,7 +399,7 @@ export function annex(world: World, annexer: string, target: string, cause: stri
 export function signTreaty(world: World, kind: Treaty["kind"], parties: string[], terms: string[], rnd: Rng, tradeBonus = 0, byUserId?: string): Treaty | null {
   const valid = parties.filter((p) => world.countries[p] && !world.countries[p].annexedBy);
   if (valid.length < 2) return null;
-  const id = `treaty-${world.treaties.length}-${Math.round(world.t)}`;
+  const id = `treaty-${Object.keys(world.treaties).length}-${Math.round(world.t)}`;
   const t: Treaty = {
     id,
     name: `${kindLabel(kind)}: ${valid.map((p) => world.countries[p].name).join(" / ")}`,
@@ -445,7 +476,7 @@ export function imposeSanction(world: World, by: string, target: string, kind: S
   const existing = t.sanctions.find((id) => world.sanctions[id]?.imposedBy.includes(by));
   if (existing) return world.sanctions[existing];
 
-  const id = `sanction-${world.sanctions.length}-${Math.round(world.t)}`;
+  const id = `sanction-${Object.keys(world.sanctions).length}-${Math.round(world.t)}`;
   const power = Math.sqrt(b.economy.gdp / Math.max(1, t.economy.gdp));
   const scope = clamp(Math.round(24 + power * 22 + rnd.float(-8, 14)), 8, 92);
   const bite = (kind === "embargo" || kind === "technology" || kind === "oil" ? 1.5 : 1) * scope;

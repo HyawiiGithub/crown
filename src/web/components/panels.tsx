@@ -1,618 +1,849 @@
 import { useMemo, useState } from "react";
-import type { Bill, Company, Country, MarketState, War } from "../../shared/types";
-import { SECTORS } from "../../data/economy";
-import { credits, money, pct, pct0, people, signedPct, GOVERNMENT_LABELS, SECTOR_ORDER, deltaClass } from "../format";
-import { Bar, Chip, DataTable, Empty, Panel, Stat, Tabs } from "./primitives";
+import type { BudgetPlan, Character, Company, Country, MarketState, SectorId, Sanction, TaxPolicy, Treaty, War } from "../../shared/types";
+import { SECTORS, COMMODITY_LABELS } from "../../data/economy";
+import { COUNTRY_BY_ISO3 } from "../../data/countries";
+import { act, can, useStore } from "../store";
+import { credits, money, pct, pct0, people, signedPct, GOVERNMENT_LABELS, deltaClass, simDate, YEAR } from "../format";
+import { Bar, Chip, DataTable, Empty, Panel, Spark, Stat, Tabs } from "./primitives";
 
 // ===========================================================================
-// Country panel: the economy, the state, the military, the legislature.
+// Flags: real flags for modern states, a colour chip for historical polities,
+// because today's flag on the 1900 German Empire would simply be wrong.
 // ===========================================================================
 
-export function CountryPanel({ country, warCount, onAct, bills }: { country: Country | null; warCount: number; onAct?: (op: Record<string, unknown>) => void; bills?: Record<string, Bill> }) {
-  const [tab, setTab] = useState("economy");
+export function Flag({ c, size = 18 }: { c: Pick<Country, "id" | "mapColor" | "name">; size?: number }) {
+  const year = useStore((s) => s.scenario?.year ?? 2026);
+  const iso2 = COUNTRY_BY_ISO3[c.id]?.iso2;
+  if (year >= 2010 && iso2) {
+    return <img src={`https://flagcdn.com/w40/${iso2.toLowerCase()}.png`} alt="" width={size * 1.4} height={size} style={{ objectFit: "cover", borderRadius: 2, flex: "none" }} onError={(e) => ((e.target as HTMLImageElement).style.display = "none")} />;
+  }
+  return <span aria-hidden style={{ width: size * 1.4, height: size, background: c.mapColor, borderRadius: 2, flex: "none", display: "inline-block", border: "1px solid var(--rule)" }} />;
+}
+
+function charName(characters: Record<string, Character>, id?: string): string {
+  return id && characters[id] ? characters[id].name : "Unnamed official";
+}
+
+const TAX_FIELDS: { key: keyof TaxPolicy; label: string; hint: string; max: number }[] = [
+  { key: "income", label: "Income tax", hint: "Falls on wages. High rates shrink the labour force and invite evasion.", max: 0.7 },
+  { key: "payroll", label: "Payroll tax", hint: "Paid on every job. Funds welfare; discourages hiring.", max: 0.4 },
+  { key: "corporate", label: "Corporate tax", hint: "Comes out of firm profits. Lower investment and share prices if high.", max: 0.6 },
+  { key: "vat", label: "VAT / excise", hint: "A tax on consumption. Hits working households hardest.", max: 0.3 },
+  { key: "tariff", label: "Tariffs", hint: "Raises money and protects industry, at the cost of trade and higher prices.", max: 0.8 },
+  { key: "royalty", label: "Resource royalty", hint: "A share of mining and extraction output.", max: 0.9 },
+];
+
+const BUDGET_FIELDS: { key: keyof BudgetPlan; label: string; hint: string }[] = [
+  { key: "defence", label: "Defence", hint: "Buys armies. Also demand for the defence industry." },
+  { key: "welfare", label: "Welfare", hint: "Pensions and transfers. Lifts the working class, cuts inequality, raises the NAIRU slightly." },
+  { key: "health", label: "Health", hint: "Hospitals and care. Demand for the healthcare sector." },
+  { key: "education", label: "Education", hint: "Raises long-run productivity and lowers the NAIRU, slowly." },
+  { key: "infrastructure", label: "Infrastructure", hint: "Roads, grids, ports. Lifts potential growth." },
+  { key: "science", label: "Science", hint: "Public research. The strongest long-run growth lever." },
+  { key: "administration", label: "Administration", hint: "The civil service. Helps against corruption." },
+  { key: "subsidies", label: "Industry subsidies", hint: "General support for business." },
+];
+
+// ===========================================================================
+// Country panel
+// ===========================================================================
+
+export function CountryPanel({ country }: { country: Country | null }) {
+  const player = useStore((s) => s.playerCountry);
+  const [tab, setTab] = useState("overview");
   const c = country;
   if (!c) return <Empty>Select a country on the map</Empty>;
-
+  const mine = c.id === player;
+  const tabs = [
+    { id: "overview", label: "Overview" },
+    { id: "budget", label: "Budget" },
+    { id: "bank", label: "Money" },
+    { id: "sectors", label: "Sectors" },
+    { id: "people", label: "People" },
+    { id: "firms", label: "Firms" },
+    { id: "trade", label: "Trade" },
+    { id: "politics", label: "Politics" },
+    { id: "world", label: "Foreign" },
+    { id: "military", label: "Military" },
+  ];
   return (
     <>
       <header className="pad" style={{ borderBottom: "1px solid var(--rule)" }}>
         <div className="row">
-          <span style={{ fontSize: 22 }}>{c.flagEmoji}</span>
-          <div className="grow">
-            <h2 style={{ fontSize: 19 }}>{c.name}</h2>
-            <div className="dim" style={{ fontSize: 11 }}>
-              {c.formalName && c.formalName !== c.name ? `${c.formalName} · ` : ""}
-              {GOVERNMENT_LABELS[c.government] ?? c.government}
-            </div>
+          <Flag c={c} size={22} />
+          <div className="grow" style={{ minWidth: 0 }}>
+            <h2 style={{ fontSize: 18 }} className="truncate">{c.name}</h2>
+            <div className="dim" style={{ fontSize: 11 }}>{GOVERNMENT_LABELS[c.government] ?? c.government}{c.overlord ? " · dependency" : ""}</div>
           </div>
-          {warCount > 0 && <Chip tone="var(--negative)">War</Chip>}
+          {mine && <Chip tone="var(--accent-2)">You</Chip>}
+          {c.wars.length > 0 && <Chip tone="var(--negative)">At war</Chip>}
           {c.annexedBy && <Chip tone="var(--negative)">Abolished</Chip>}
-          {c.overlord && !c.annexedBy && <Chip tone="var(--ink-muted)">Possession</Chip>}
-          {c.banned && <Chip tone="var(--negative)">Banned</Chip>}
         </div>
       </header>
-
-      <Tabs
-        tabs={[
-          { id: "economy", label: "Economy" },
-          { id: "state", label: "State", badge: c.parties.length },
-          { id: "chamber", label: "Legislature", badge: c.legislature?.activeBills.length },
-          { id: "military", label: "Military" },
-          { id: "trade", label: "Trade" },
-        ]}
-        active={tab}
-        onChange={setTab}
-      />
-
-      <div className="scroll pad">
-        {tab === "economy" && <Economy c={c} onAct={onAct} />}
-        {tab === "state" && <State c={c} />}
-        {tab === "chamber" && <Chamber c={c} onAct={onAct} bills={bills ?? {}} />}
-        {tab === "military" && <Military c={c} />}
-        {tab === "trade" && <Trade c={c} />}
+      <Tabs tabs={tabs} active={tab} onChange={setTab} />
+      <div className="scroll pad grow" style={{ minHeight: 0 }}>
+        {tab === "overview" && <Overview c={c} mine={mine} />}
+        {tab === "budget" && <Budget c={c} mine={mine} />}
+        {tab === "bank" && <Bank c={c} mine={mine} />}
+        {tab === "sectors" && <Sectors c={c} mine={mine} />}
+        {tab === "people" && <People c={c} mine={mine} />}
+        {tab === "firms" && <Firms c={c} mine={mine} />}
+        {tab === "trade" && <Trade c={c} mine={mine} />}
+        {tab === "politics" && <Politics c={c} mine={mine} />}
+        {tab === "world" && <Foreign c={c} mine={mine} />}
+        {tab === "military" && <Military c={c} mine={mine} />}
       </div>
     </>
   );
 }
 
-function Economy({ c, onAct }: { c: Country; onAct?: (op: Record<string, unknown>) => void }) {
+function Overview({ c, mine }: { c: Country; mine: boolean }) {
+  const characters = useStore((s) => s.characters);
+  const start = useStore((s) => s.scenario?.startDate);
   const e = c.economy;
-  const spending = e.fiscal.military + e.fiscal.welfare + e.fiscal.infrastructure + e.fiscal.education + e.fiscal.healthcare + e.fiscal.administration;
+  const m = e.macro;
+  const a = e.accounts;
+  const alerts: string[] = [];
+  if (e.monetary.inflation > 0.1) alerts.push(`Inflation is ${pct(e.monetary.inflation)}.`);
+  if (e.labour.unemployment > 0.1) alerts.push(`Unemployment is ${pct(e.labour.unemployment)}.`);
+  if (m.riskPremium > 0.05) alerts.push(`Bond markets charge a ${pct(m.riskPremium)} risk premium.`);
+  if (m.defaulted) alerts.push("The state is in default.");
+  if (m.npl > 0.1) alerts.push(`Bad loans have reached ${pct0(m.npl)} of lending.`);
+  if (c.executive.approval < 30) alerts.push(`Approval is down to ${pct0(c.executive.approval / 100)}.`);
+  const hist = e.history;
   return (
     <div className="stack">
       <div className="card">
-        <div className="eyebrow" style={{ marginBottom: 6 }}>Output</div>
-        <Stat label="GDP" value={credits(e.gdp)} />
-        <Stat label="Per capita" value={money(e.gdpPerCapita, 0)} />
-        <Stat label="Growth" value={signedPct(e.gdpGrowth)} tone={e.gdpGrowth >= 0 ? "pos" : "neg"} />
+        <Stat label={c.executive.headOfStateTitle} value={<span className="ink-text">{charName(characters, c.executive.headOfStateId)}</span>} />
+        {c.executive.headOfGovernmentId && c.executive.headOfGovernmentId !== c.executive.headOfStateId && <Stat label={c.executive.headOfGovernmentTitle} value={<span className="ink-text">{charName(characters, c.executive.headOfGovernmentId)}</span>} />}
+        <Stat label="Approval" value={pct0(c.executive.approval / 100)} tone={c.executive.approval >= 45 ? "pos" : "neg"} />
+        {c.nextElectionAt !== undefined && start && <Stat label="Next election" value={simDate(start, c.nextElectionAt).slice(0, 7)} />}
+      </div>
+      {alerts.length > 0 && (
+        <div className="card" style={{ borderColor: "var(--negative)" }}>
+          <div className="eyebrow" style={{ marginBottom: 4 }}>Warnings</div>
+          {alerts.map((x) => <div key={x} style={{ fontSize: 12 }}>{x}</div>)}
+        </div>
+      )}
+      <div className="card">
+        <div className="eyebrow" style={{ marginBottom: 6 }}>Headline</div>
+        <Stat label="GDP" value={`$${credits(e.gdp)}`} />
+        <Stat label="GDP per person" value={`$${money(e.gdpPerCapita, 0)}`} />
+        <Stat label="Real growth" value={signedPct(e.gdpGrowth, 1)} tone={e.gdpGrowth >= 0 ? "pos" : "neg"} />
+        <Stat label="Inflation" value={signedPct(e.monetary.inflation, 1)} tone={e.monetary.inflation > 0.05 ? "neg" : ""} />
+        <Stat label="Unemployment" value={pct(e.labour.unemployment)} tone={e.labour.unemployment > 0.08 ? "neg" : ""} />
+        <Stat label="Output gap" value={signedPct(m.outputGap, 1)} hint="How far GDP is above or below what the economy can sustain." />
         <Stat label="Population" value={people(e.population)} />
-        <Stat label="Productivity" value={e.productivity.toFixed(1)} />
-      </div>
-
-      <div className="card">
-        <div className="eyebrow" style={{ marginBottom: 6 }}>Prices and labour</div>
-        <Stat label="Inflation" value={signedPct(e.monetary.inflation)} tone={e.monetary.inflation > 0.04 ? "neg" : ""} />
-        <Stat label="Policy rate" value={pct(e.monetary.policyRate, 2)} />
-        <Stat label="Unemployment" value={pct(e.labour.unemployment)} tone={e.labour.unemployment > 0.08 ? "neg" : "pos"} />
-        <Stat label="Strike risk" value={pct0(e.labour.strikeRisk)} />
-        <Stat label="Unionisation" value={pct0(e.labour.unionisation)} />
-        <Stat label="Median wage" value={money(e.labour.medianWage, 0)} />
-        <Stat label="Satisfaction" value={pct0(e.labour.satisfaction)} />
-        <Stat label="Exchange rate" value={money(e.monetary.exchangeRateVsUsd, 3)} />
-      </div>
-
-      <div className="card">
-        <div className="eyebrow" style={{ marginBottom: 6 }}>Public finances</div>
-        <Stat label="Revenue" value={credits(e.fiscal.revenue)} />
-        <Stat label="Expenditure" value={credits(e.fiscal.expenditure)} />
-        <Stat label="Balance" value={signedPct(e.fiscal.budgetBalanceRatio)} tone={e.fiscal.budgetBalanceRatio >= 0 ? "pos" : "neg"} />
-        <Stat label="Debt" value={credits(e.fiscal.debt)} />
         <Stat label="Debt / GDP" value={pct0(e.fiscal.debtToGdp)} tone={e.fiscal.debtToGdp > 1 ? "neg" : ""} />
-        <Stat label="Debt service" value={credits(e.fiscal.debtService)} />
-        <Stat label="Credit rating" value={pct0(e.fiscal.creditRating)} />
-        <Stat label="Treasury" value={credits(e.fiscal.treasury)} />
-        <Stat label="Reserves" value={credits(e.reserves)} />
-        <div className="stack" style={{ marginTop: 8 }}>
-          {[
-            ["Military", e.fiscal.military],
-            ["Welfare", e.fiscal.welfare],
-            ["Infrastructure", e.fiscal.infrastructure],
-            ["Education", e.fiscal.education],
-            ["Health", e.fiscal.healthcare],
-            ["Administration", e.fiscal.administration],
-            ["Debt service", e.fiscal.debtService],
-          ].map(([label, v]) => (
-            <div key={String(label)}>
-              <div className="row" style={{ justifyContent: "space-between", fontSize: 11 }}>
-                <span className="dim">{label}</span>
-                <span className="mono">{pct0(Number(v) / (spending || 1))}</span>
-              </div>
-              <Bar value={Number(v)} max={spending || 1} />
-            </div>
-          ))}
-        </div>
+        <Stat label="Budget balance" value={signedPct(e.fiscal.budgetBalanceRatio, 1)} tone={e.fiscal.budgetBalanceRatio >= -0.03 ? "" : "neg"} />
       </div>
-
-      <div className="card">
-        <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
-          <span className="eyebrow">Sectors</span>
-          <span className="dim mono" style={{ fontSize: 11 }}>R&amp;D {pct(e.rd / Math.max(1, e.gdp), 2)}</span>
+      {hist.length > 2 ? (
+        <div className="spark-grid">
+          <Spark title="Real growth" values={hist.map((h) => h.gdpGrowth)} format={(v) => signedPct(v, 1)} zero />
+          <Spark title="Inflation" values={hist.map((h) => h.inflation)} format={(v) => signedPct(v, 1)} zero />
+          <Spark title="Unemployment" values={hist.map((h) => h.unemployment)} format={(v) => pct(v)} />
+          <Spark title="Debt / GDP" values={hist.map((h) => h.debtToGdp)} format={(v) => pct0(v)} />
         </div>
-        <div className="stack">
-          {[...e.sectors].sort((a, b) => b.share - a.share).map((s) => {
-            const prof = SECTORS[s.id];
-            return (
-              <div key={s.id} title={prof?.blurb}>
-                <div className="row" style={{ justifyContent: "space-between", fontSize: 11.5 }}>
-                  <span className="truncate">{prof?.label ?? s.id}</span>
-                  <span className="row" style={{ gap: 8 }}>
-                    <span className={deltaClass(s.growth)}>{signedPct(s.growth)}</span>
-                    <span className="mono dim">{pct0(s.share)}</span>
-                  </span>
-                </div>
-                <Bar value={s.share} max={Math.max(...e.sectors.map((x) => x.share))} />
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
+      ) : (
+        <div className="dim" style={{ fontSize: 11 }}>{mine ? "Charts appear after the first simulated month." : "History builds as the game runs."}</div>
+      )}
       <div className="card">
-        <div className="eyebrow" style={{ marginBottom: 6 }}>Structural</div>
-        <Stat label="Corruption" value={pct0(e.corruption)} tone={e.corruption > 0.5 ? "neg" : ""} />
-        <Stat label="Inequality" value={pct0(e.inequality)} tone={e.inequality > 0.5 ? "neg" : ""} />
-        <Stat label="Net foreign assets" value={credits(e.netForeignAssets)} />
-        {onAct && (
-          <div className="row row--wrap" style={{ marginTop: 8, gap: 6 }}>
-            <button className="btn btn--sm" onClick={() => onAct({ type: "set-policy", country: c.id, area: "economy", value: Math.min(100, c.policies.economy + 20) })}>Invest &minus;</button>
-            <button className="btn btn--sm" onClick={() => onAct({ type: "set-policy", country: c.id, area: "economy", value: Math.min(100, c.policies.economy + 20) })}>Invest +</button>
-            <button className="btn btn--sm" onClick={() => onAct({ type: "set-policy", country: c.id, area: "tax", value: Math.max(-100, c.policies.tax - 15) })}>Cut tax</button>
-            <button className="btn btn--sm" onClick={() => onAct({ type: "set-policy", country: c.id, area: "tax", value: Math.min(100, c.policies.tax + 15) })}>Raise tax</button>
+        <div className="eyebrow" style={{ marginBottom: 6 }}>National accounts (Y = C + I + G + X - M)</div>
+        {([["Consumption", a.consumption], ["Investment", a.investment], ["Government", a.government], ["Exports", a.exports]] as [string, number][]).map(([label, v]) => (
+          <div key={label}>
+            <div className="row" style={{ justifyContent: "space-between", fontSize: 11.5 }}><span className="dim">{label}</span><span className="mono">${credits(v)} · {pct0(v / e.gdp)}</span></div>
+            <Bar value={v} max={e.gdp} />
           </div>
-        )}
+        ))}
+        <div className="row" style={{ justifyContent: "space-between", fontSize: 11.5, marginTop: 4 }}><span className="dim">Imports (subtracted)</span><span className="mono">-${credits(a.imports)} · {pct0(a.imports / e.gdp)}</span></div>
+        <Stat label="Potential growth" value={signedPct(m.potentialGrowth, 1)} hint="The growth the supply side can sustain: capital, workers and productivity." />
+        <Stat label="Productivity growth (TFP)" value={signedPct(m.tfpGrowth, 1)} />
+        <Stat label="Capital stock" value={`$${credits(m.capital * m.priceLevel / e.monetary.exchangeRateVsUsd)}`} />
+        <Stat label="Consumer confidence" value={m.consumerConfidence.toFixed(0)} />
+        <Stat label="Business confidence" value={m.businessConfidence.toFixed(0)} />
       </div>
+      <div className="row" style={{ gap: 6 }}>
+        <span className="dim" style={{ fontSize: 11 }}>Corruption {pct0(e.corruption)} · Inequality (Gini) {e.inequality.toFixed(2)} · Cohesion {c.cohesion.toFixed(0)}</span>
+      </div>
+      {!mine && <ChangeCountry c={c} />}
     </div>
   );
 }
 
-function State({ c }: { c: Country }) {
-  const hos = c.executive.headOfStateId;
-  const hog = c.executive.headOfGovernmentId;
+function ChangeCountry({ c }: { c: Country }) {
+  return <button className="btn btn--sm" onClick={() => { if (confirm(`Stop governing your current country and take over ${c.name}?`)) void act({ type: "choose-country", country: c.id }); }}>Govern {c.name} instead</button>;
+}
+
+function RateSlider({ label, value, max, step = 0.001, hint, disabled, onChange }: { label: string; value: number; max: number; step?: number; hint?: string; disabled?: boolean; onChange: (v: number) => void }) {
+  return (
+    <label className="slider" title={hint}>
+      <span className="row" style={{ justifyContent: "space-between", fontSize: 12 }}>
+        <span>{label}</span>
+        <span className="mono">{(value * 100).toFixed(1)}%</span>
+      </span>
+      <input type="range" min={0} max={max} step={step} value={value} disabled={disabled} onChange={(e) => onChange(Number(e.target.value))} />
+    </label>
+  );
+}
+
+function Budget({ c, mine }: { c: Country; mine: boolean }) {
+  const e = c.economy;
+  const f = e.fiscal;
+  const [tax, setTax] = useState<Partial<TaxPolicy>>({});
+  const [budget, setBudget] = useState<Partial<BudgetPlan>>({});
+  const bills = useStore((s) => s.bills);
+  const pending = Object.values(bills).filter((b) => b.country === c.id && (b.status === "introduced" || b.status === "in-committee"));
+  const dirty = Object.keys(tax).length + Object.keys(budget).length > 0;
+
+  const curTax = { ...e.tax, ...tax };
+  const curBudget = { ...e.budget, ...budget };
+  // A first-round estimate only; the real answer comes out of the simulation.
+  const revenueDelta = (Object.keys(tax) as (keyof TaxPolicy)[]).reduce((a, k) => {
+    const base = k === "income" || k === "payroll" ? e.gdp * 0.44 : k === "corporate" ? e.gdp * 0.21 : k === "vat" ? e.accounts.consumption * 0.8 : k === "tariff" ? e.accounts.imports * 0.85 : (e.sectors.find((s) => s.id === "mining")?.output ?? 0);
+    return a + ((tax[k] ?? 0) - e.tax[k]) * base;
+  }, 0);
+  const spendDelta = (Object.keys(budget) as (keyof BudgetPlan)[]).reduce((a, k) => a + ((budget[k] ?? 0) - e.budget[k]) * e.gdp, 0);
+  const projected = f.budgetBalanceRatio + (revenueDelta - spendDelta) / e.gdp;
+  const spending = f.expenditure || 1;
+  const decree = mine && !c.legislature;
+
+  return (
+    <div className="stack">
+      <div className="card">
+        <div className="eyebrow" style={{ marginBottom: 6 }}>Public finances</div>
+        <Stat label="Revenue" value={`$${credits(f.revenue)} · ${pct0(f.revenue / e.gdp)}`} />
+        <Stat label="Spending" value={`$${credits(f.expenditure)} · ${pct0(f.expenditure / e.gdp)}`} />
+        <Stat label="Balance" value={`${signedPct(f.budgetBalanceRatio, 1)} of GDP`} tone={f.budgetBalanceRatio >= -0.03 ? "pos" : "neg"} />
+        <Stat label="Debt" value={`$${credits(f.debt)} · ${pct0(f.debtToGdp)}`} />
+        <Stat label="Interest bill" value={`$${credits(f.debtService)} · ${pct0(f.debtService / Math.max(1, f.revenue))} of revenue`} />
+        <Stat label="10-year bond yield" value={pct(e.macro.bondYield, 2)} />
+        <Stat label="Credit rating" value={ratingLabel(f.creditRating)} tone={f.creditRating > 0.6 ? "pos" : "neg"} />
+      </div>
+      <Panel title="Revenue by source">
+        {([["Income and payroll", f.taxIncome], ["Corporate", f.corporateTax], ["VAT / excise", f.vat], ["Tariffs", f.tariffs], ["Resources", f.resourceRent]] as [string, number][]).map(([l, v]) => (
+          <div key={l}><div className="row" style={{ justifyContent: "space-between", fontSize: 11.5 }}><span className="dim">{l}</span><span className="mono">${credits(v)}</span></div><Bar value={v} max={f.revenue || 1} /></div>
+        ))}
+      </Panel>
+      <Panel title={mine ? "Tax rates" : "Tax rates"}>
+        {TAX_FIELDS.map((x) => <RateSlider key={x.key} label={x.label} hint={x.hint} value={curTax[x.key]} max={x.max} disabled={!mine} onChange={(v) => setTax({ ...tax, [x.key]: v })} />)}
+      </Panel>
+      <Panel title="Spending, % of GDP">
+        {BUDGET_FIELDS.map((x) => <RateSlider key={x.key} label={x.label} hint={x.hint} value={curBudget[x.key]} max={Math.max(0.05, e.macro.baseBudget[x.key] * 4, 0.15)} step={0.0005} disabled={!mine} onChange={(v) => setBudget({ ...budget, [x.key]: v })} />)}
+        <div className="dim" style={{ fontSize: 11, marginTop: 6 }}>Interest of ${credits(f.debtService)} is paid on top and cannot be cut, short of a default.</div>
+        <div style={{ fontSize: 11, marginTop: 2 }}><span className="dim">Share of total spending: </span><span className="mono">defence {pct0(f.military / spending)}, welfare {pct0(f.welfare / spending)}, health {pct0(f.healthcare / spending)}, education {pct0(f.education / spending)}</span></div>
+      </Panel>
+      {mine && (
+        <div className="card sticky-actions">
+          <Stat label="Estimated balance after changes" value={`${signedPct(projected, 1)} of GDP`} tone={projected >= -0.03 ? "pos" : "neg"} />
+          <div className="row" style={{ gap: 6, marginTop: 6 }}>
+            <button className="btn btn--primary grow" disabled={!dirty} onClick={() => void act({ type: "apply-policy", tax: Object.keys(tax).length ? tax : undefined, budget: Object.keys(budget).length ? budget : undefined }).then((r) => { if (r.ok) { setTax({}); setBudget({}); } })}>
+              {decree || !c.legislature ? "Decree the budget" : "Send to parliament"}
+            </button>
+            <button className="btn" disabled={!dirty} onClick={() => { setTax({}); setBudget({}); }}>Reset</button>
+          </div>
+          {pending.length > 0 && <div className="dim" style={{ fontSize: 11, marginTop: 6 }}>{pending.length} bill{pending.length > 1 ? "s" : ""} before parliament. See Politics.</div>}
+        </div>
+      )}
+      {mine && (e.macro.riskPremium > 0.05 || f.debtToGdp > 1.5) && (
+        <Panel title="Debt crisis options">
+          <div className="row row--wrap" style={{ gap: 6 }}>
+            <button className="btn btn--sm" onClick={() => void act({ type: "imf-bailout" })}>Ask the IMF for a programme</button>
+            <button className="btn btn--sm btn--danger" onClick={() => { if (confirm("Default on the national debt? Lenders will not forget.")) void act({ type: "default", haircut: 0.4 }); }}>Default on the debt</button>
+          </div>
+        </Panel>
+      )}
+    </div>
+  );
+}
+
+function ratingLabel(r: number): string {
+  if (r > 0.9) return "AAA";
+  if (r > 0.82) return "AA";
+  if (r > 0.72) return "A";
+  if (r > 0.6) return "BBB";
+  if (r > 0.45) return "BB";
+  if (r > 0.3) return "B";
+  if (r > 0.15) return "CCC";
+  return "D";
+}
+
+const REGIME_LABELS: Record<string, string> = { float: "Floating currency", peg: "Currency peg", gold: "Gold standard", union: "Currency union", command: "Command economy" };
+
+function Bank({ c, mine }: { c: Country; mine: boolean }) {
+  const e = c.economy;
+  const cb = e.centralBank;
+  const m = e.macro;
+  const [rate, setRate] = useState<number | null>(null);
+  const controls = mine && !cb.independent && cb.regime !== "union";
+  const shownRate = rate ?? e.monetary.centralBankRate;
+  return (
+    <div className="stack">
+      <div className="card">
+        <div className="eyebrow" style={{ marginBottom: 6 }}>Monetary conditions</div>
+        <Stat label="Policy rate" value={pct(e.monetary.policyRate, 2)} />
+        <Stat label="Bond yield" value={pct(m.bondYield, 2)} />
+        <Stat label="Neutral real rate" value={pct(m.neutralRate, 2)} hint="The real rate that neither stimulates nor slows the economy." />
+        <Stat label="Inflation" value={signedPct(e.monetary.inflation, 1)} />
+        <Stat label="Expected inflation" value={signedPct(m.expectedInflation, 1)} />
+        <Stat label="Inflation target" value={pct(cb.target, 1)} />
+        <Stat label="Credibility" value={pct0(cb.credibility)} hint="How firmly expectations are tied to the target. Printing money destroys it." />
+      </div>
+      <div className="card">
+        <div className="eyebrow" style={{ marginBottom: 6 }}>Currency</div>
+        <Stat label="Regime" value={REGIME_LABELS[cb.regime]} />
+        <Stat label="Currency" value={cb.currency} />
+        <Stat label="Against the dollar since start" value={signedPct(1 / e.monetary.exchangeRateVsUsd - 1, 0)} tone={e.monetary.exchangeRateVsUsd > 1.02 ? "neg" : ""} />
+        <Stat label="Real exchange rate" value={signedPct(m.realExchange, 0)} hint="Positive means overvalued, which hurts exporters." />
+        <Stat label="FX reserves" value={`$${credits(e.reserves)} · ${(e.reserves / Math.max(1, e.accounts.imports / 12)).toFixed(1)} months of imports`} />
+        <Stat label="Current account" value={`${signedPct(m.currentAccount / e.gdp, 1)} of GDP`} />
+        <Stat label="Net foreign assets" value={`$${credits(e.netForeignAssets)}`} />
+      </div>
+      <div className="card">
+        <div className="eyebrow" style={{ marginBottom: 6 }}>Banks</div>
+        <Stat label="Bank credit / GDP" value={pct0(m.credit)} />
+        <Stat label="Bad loans" value={pct(m.npl)} tone={m.npl > 0.08 ? "neg" : ""} />
+        <Stat label="House prices" value={m.housePrice.toFixed(0)} hint="Index, 100 at the start." />
+      </div>
+      {mine && (
+        <Panel title="Orders to the central bank">
+          {cb.regime === "union" && <div className="dim" style={{ fontSize: 12 }}>Your rates are set by the currency union.</div>}
+          {cb.independent && cb.regime !== "union" && <div className="dim" style={{ fontSize: 12, marginBottom: 6 }}>The governor runs rates independently using a Taylor rule. That anchors expectations, but you cannot order a rate cut.</div>}
+          {controls && (
+            <>
+              <RateSlider label="Policy rate target" value={shownRate} max={Math.max(0.3, shownRate * 1.5)} step={0.0025} onChange={setRate} />
+              <button className="btn btn--sm btn--primary" disabled={rate === null} onClick={() => void act({ type: "set-rate", value: rate }).then(() => setRate(null))}>Set rate</button>
+            </>
+          )}
+          {cb.regime !== "union" && <RateSlider label="Inflation target" value={cb.target} max={0.1} step={0.0025} onChange={(v) => void act({ type: "set-target", value: v })} />}
+          {controls && <RateSlider label="Deficit financed by printing money" hint="Painless at first. Then inflation, then a currency crisis." value={cb.printing} max={1} step={0.05} onChange={(v) => void act({ type: "set-printing", value: v })} />}
+          {cb.regime !== "union" && <RateSlider label="Quantitative easing (holdings / GDP)" value={cb.qe} max={1} step={0.01} onChange={(v) => void act({ type: "set-qe", value: v })} />}
+          <div className="row row--wrap" style={{ gap: 6, marginTop: 8 }}>
+            {e.monetary.inflation > 0.15 && <button className="btn btn--sm btn--danger" title="Stop printing, cut the budget and reset expectations. Costs a short recession." onClick={() => void act({ type: "stabilisation-plan" })}>Launch a stabilisation plan</button>}
+            {cb.regime !== "union" && (["float", "peg", "gold"] as const).filter((r) => r !== cb.regime).map((r) => <button key={r} className="btn btn--sm" onClick={() => void act({ type: "set-regime", value: r })}>Move to {REGIME_LABELS[r].toLowerCase()}</button>)}
+            {cb.regime !== "union" && <button className="btn btn--sm" onClick={() => void act({ type: "set-independence", value: !cb.independent })}>{cb.independent ? "End independence" : "Grant independence"}</button>}
+          </div>
+        </Panel>
+      )}
+    </div>
+  );
+}
+
+function Sectors({ c, mine }: { c: Country; mine: boolean }) {
+  const e = c.economy;
+  const [open, setOpen] = useState<SectorId | null>(null);
+  const rows = [...e.sectors].sort((a, b) => b.share - a.share);
+  const selected = open ? e.sectors.find((s) => s.id === open) : undefined;
+  return (
+    <div className="stack">
+      <DataTable
+        rows={rows}
+        rowKey={(s) => s.id}
+        onRow={(s) => setOpen(open === s.id ? null : s.id)}
+        columns={[
+          { id: "n", label: "Sector", render: (s) => <span className="truncate">{SECTORS[s.id].label}</span> },
+          { id: "share", label: "Share", right: true, render: (s) => <span className="mono">{pct0(s.share)}</span> },
+          { id: "g", label: "Growth", right: true, render: (s) => <span className={`mono ${deltaClass(s.growth)}`}>{signedPct(s.growth, 1)}</span> },
+          { id: "p", label: "Price", right: true, render: (s) => <span className="mono dim">{s.price.toFixed(2)}</span> },
+        ]}
+      />
+      {selected && (
+        <div className="card">
+          <div className="row"><strong className="grow">{SECTORS[selected.id].label}</strong><button className="btn btn--sm" onClick={() => setOpen(null)}>Close</button></div>
+          <div className="dim" style={{ fontSize: 11, margin: "4px 0 8px" }}>{SECTORS[selected.id].blurb}</div>
+          <Stat label="Output" value={`$${credits(selected.output)}`} />
+          <Stat label="Jobs" value={people(selected.employment)} />
+          <Stat label="Average wage" value={`$${money(selected.wage, 0)}`} />
+          <Stat label="Output per worker" value={`$${money(selected.productivity, 0)}`} />
+          <Stat label="Operating margin" value={pct(selected.margin)} />
+          <Stat label="Capacity in use" value={pct0(selected.quantity / Math.max(1, selected.capacity))} />
+          <Stat label="Market concentration" value={pct0(selected.concentration)} />
+          <Stat label="State owned" value={pct0(selected.stateOwnership)} />
+          <Stat label="Subsidy" value={pct0(selected.stateSubsidy)} />
+          <Stat label="Regulation" value={pct0(selected.regulation)} />
+          {mine && (
+            <div className="row row--wrap" style={{ gap: 4, marginTop: 8 }}>
+              <button className="btn btn--sm" onClick={() => void act({ type: "set-sector", id: selected.id, subsidy: Math.min(0.5, selected.stateSubsidy + 0.05) })}>Subsidy +5%</button>
+              <button className="btn btn--sm" disabled={selected.stateSubsidy <= 0} onClick={() => void act({ type: "set-sector", id: selected.id, subsidy: Math.max(0, selected.stateSubsidy - 0.05) })}>Subsidy -5%</button>
+              <button className="btn btn--sm" onClick={() => void act({ type: "set-sector", id: selected.id, regulation: Math.max(0, selected.regulation - 0.1) })}>Deregulate</button>
+              <button className="btn btn--sm" onClick={() => void act({ type: "set-sector", id: selected.id, regulation: Math.min(1, selected.regulation + 0.1) })}>Regulate</button>
+              <button className="btn btn--sm" onClick={() => void act({ type: "set-sector", id: selected.id, stateOwnership: Math.min(1, selected.stateOwnership + 0.2) })}>More state ownership</button>
+              <button className="btn btn--sm" onClick={() => void act({ type: "set-sector", id: selected.id, stateOwnership: Math.max(0, selected.stateOwnership - 0.2) })}>Privatise 20%</button>
+            </div>
+          )}
+        </div>
+      )}
+      <div className="dim" style={{ fontSize: 11 }}>Select a sector for its market{mine ? " and your policy levers" : ""}. Prices are relative to the start, adjusted for general inflation.</div>
+    </div>
+  );
+}
+
+function People({ c, mine }: { c: Country; mine: boolean }) {
+  const e = c.economy;
+  const l = e.labour;
+  const [mw, setMw] = useState<number | null>(null);
+  return (
+    <div className="stack">
+      <div className="card">
+        <div className="eyebrow" style={{ marginBottom: 6 }}>Labour market</div>
+        <Stat label="Unemployment" value={pct(l.unemployment)} />
+        <Stat label="Natural rate (NAIRU)" value={pct(e.macro.nairu)} hint="Unemployment that does not push wages up or down." />
+        <Stat label="Participation" value={pct0(l.participation)} />
+        <Stat label="Median wage" value={`$${money(l.medianWage, 0)}`} />
+        <Stat label="Wage growth" value={signedPct(l.wageGrowth, 1)} />
+        <Stat label="Union membership" value={pct0(l.unionisation)} />
+        <Stat label="Strike risk" value={pct0(l.strikeRisk)} tone={l.strikeRisk > 0.25 ? "neg" : ""} />
+        {mine ? (
+          <>
+            <RateSlider label="Minimum wage (% of median)" value={mw ?? e.macro.minimumWage} max={1} step={0.01} hint="Lifts the lowest pay. Past about 55% of the median it starts costing jobs." onChange={setMw} />
+            <button className="btn btn--sm btn--primary" disabled={mw === null} onClick={() => void act({ type: "apply-policy", minimumWage: mw }).then(() => setMw(null))}>{c.legislature ? "Send to parliament" : "Decree"}</button>
+          </>
+        ) : (
+          <Stat label="Minimum wage" value={`${pct0(e.macro.minimumWage)} of median`} />
+        )}
+      </div>
+      {e.households.map((h) => (
+        <div className="card" key={h.id}>
+          <div className="row"><strong className="grow">{h.label}</strong><span className="dim mono" style={{ fontSize: 11 }}>{pct0(h.popShare)} of people</span></div>
+          <Stat label="Share of income" value={pct0(h.incomeShare)} />
+          <Stat label="Disposable income, per person" value={`$${money(h.income, 0)}`} />
+          <Stat label="Cost of living" value={h.costOfLiving.toFixed(2)} hint="This group's own basket; 1.00 at the start." />
+          <Stat label="Savings rate" value={pct0(h.savingsRate)} />
+          <div className="row" style={{ justifyContent: "space-between", fontSize: 11.5, marginTop: 4 }}><span className="dim">Satisfaction</span><span className="mono">{pct0(h.satisfaction)}</span></div>
+          <Bar value={h.satisfaction} max={1} tone={h.satisfaction >= 0.5 ? "var(--positive)" : "var(--negative)"} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Firms({ c, mine }: { c: Country; mine: boolean }) {
+  const companies = useStore((s) => s.companies);
+  const rows = Object.values(companies).filter((x) => x.country === c.id).sort((a, b) => b.valuation - a.valuation);
+  const [open, setOpen] = useState<string | null>(null);
+  const selected = open ? companies[open] : undefined;
+  if (!rows.length) return <Empty>No major corporations are based here in this era.</Empty>;
+  return (
+    <div className="stack">
+      <DataTable<Company>
+        rows={rows}
+        rowKey={(x) => x.id}
+        onRow={(x) => setOpen(open === x.id ? null : x.id)}
+        columns={[
+          { id: "n", label: "Company", render: (x) => <span className="truncate">{x.name}{x.insolvent ? " (bankrupt)" : ""}</span> },
+          { id: "r", label: "Revenue", right: true, render: (x) => <span className="mono">${credits(x.revenue)}</span> },
+          { id: "v", label: "Value", right: true, render: (x) => <span className="mono">${credits(x.valuation)}</span> },
+        ]}
+      />
+      {selected && <CompanyCard co={selected} mine={mine} />}
+    </div>
+  );
+}
+
+function CompanyCard({ co, mine }: { co: Company; mine: boolean }) {
+  return (
+    <div className="card">
+      <div className="row"><strong className="grow truncate">{co.name}</strong><Chip>{SECTORS[co.sector].label}</Chip></div>
+      <Stat label="Revenue" value={`$${credits(co.revenue)}`} />
+      <Stat label="Operating profit" value={`$${credits(co.profit)}`} tone={co.profit >= 0 ? "" : "neg"} />
+      <Stat label="Net income" value={`$${credits(co.netIncome ?? 0)}`} tone={(co.netIncome ?? 0) >= 0 ? "" : "neg"} />
+      <Stat label="Debt" value={`$${credits(co.debt)}`} />
+      <Stat label="Employees" value={people(co.employees)} />
+      <Stat label="Market value" value={`$${credits(co.valuation)}`} />
+      {co.listed && <Stat label="Share price" value={money(co.sharePrice, 2)} />}
+      <Stat label="P/E" value={(co.pe ?? 0).toFixed(1)} />
+      <Stat label="1-year return" value={signedPct(co.sharePrice / Math.max(0.01, co.sharePriceYearAgo) - 1, 0)} />
+      <Stat label="Share of home market" value={pct0(co.marketShare ?? 0)} />
+      <Stat label="State owned" value={pct0(co.stateOwnership)} />
+      {mine && (
+        <div className="row row--wrap" style={{ gap: 4, marginTop: 8 }}>
+          {co.stateOwnership < 0.99 && <button className="btn btn--sm btn--danger" onClick={() => void act({ type: "nationalise", company: co.id })}>Nationalise</button>}
+          {co.stateOwnership > 0.01 && <button className="btn btn--sm" onClick={() => void act({ type: "privatise", company: co.id })}>Privatise</button>}
+          <button className="btn btn--sm" onClick={() => void act({ type: "bail-out", company: co.id })}>Bail out</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Trade({ c, mine }: { c: Country; mine: boolean }) {
+  const countries = useStore((s) => s.countries);
+  const t = c.economy.trade;
+  const partners = Object.entries(t.flows).filter(([id]) => countries[id] && !countries[id].annexedBy).sort((a, b) => b[1] - a[1]);
+  const barriers = c.tradeBarriers ?? {};
+  return (
+    <div className="stack">
+      <div className="card">
+        <Stat label="Exports" value={`$${credits(t.exports)} · ${pct0(t.exports / c.economy.gdp)}`} />
+        <Stat label="Imports" value={`$${credits(t.imports)} · ${pct0(t.imports / c.economy.gdp)}`} />
+        <Stat label="Balance" value={`${signedPct(t.tradeBalance / c.economy.gdp, 1)} of GDP`} tone={t.tradeBalance >= 0 ? "pos" : "neg"} />
+        <Stat label="Average tariff" value={pct(t.tariffRate)} />
+      </div>
+      <Panel title="Largest partners">
+        <DataTable
+          rows={partners}
+          rowKey={([id]) => id}
+          columns={[
+            { id: "p", label: "Partner", render: ([id]) => <span className="truncate">{countries[id]?.name ?? id}</span> },
+            { id: "v", label: "Volume", right: true, render: ([, v]) => <span className="mono">${credits(v)}</span> },
+            { id: "b", label: "Barrier", right: true, render: ([id]) => <span className={`mono ${barriers[id] ? "neg" : "dim"}`}>{barriers[id] ? pct0(barriers[id]) : "none"}</span> },
+            ...(mine ? [{
+              id: "a", label: "", right: true, render: ([id]: [string, number]) => (
+                <span className="row" style={{ gap: 3, justifyContent: "flex-end" }}>
+                  <button className="btn btn--sm" title="Raise a 25% barrier" onClick={() => void act({ type: "trade-barrier", partner: id, value: Math.min(1, (barriers[id] ?? 0) + 0.25) })}>+</button>
+                  <button className="btn btn--sm" title="Remove barriers" disabled={!barriers[id]} onClick={() => void act({ type: "trade-barrier", partner: id, value: 0 })}>Free</button>
+                  <button className="btn btn--sm btn--danger" title="Full embargo" onClick={() => void act({ type: "trade-barrier", partner: id, value: 1 })}>Ban</button>
+                </span>
+              ),
+            }] : []),
+          ]}
+        />
+      </Panel>
+    </div>
+  );
+}
+
+function Politics({ c, mine }: { c: Country; mine: boolean }) {
+  const characters = useStore((s) => s.characters);
+  const bills = useStore((s) => s.bills);
+  const start = useStore((s) => s.scenario?.startDate);
+  const ex = c.executive;
+  const chamber = c.legislature?.chambers[0];
+  const total = chamber ? c.parties.reduce((a, p) => a + (p.seats[chamber.id] ?? 0), 0) || 1 : 1;
+  const govSeats = chamber ? c.parties.filter((p) => ex.coalition.includes(p.id)).reduce((a, p) => a + (p.seats[chamber.id] ?? 0), 0) : 0;
+  const countryBills = Object.values(bills).filter((b) => b.country === c.id).sort((a, b) => b.introducedAt - a.introducedAt).slice(0, 8);
+  const banker = Object.values(characters).find((x) => x.country === c.id && x.role === "central-banker");
   return (
     <div className="stack">
       <div className="card">
         <div className="eyebrow" style={{ marginBottom: 6 }}>Government</div>
-        <Stat label={c.headOfStateTitle} value={hos ?? "vacant"} />
-        <Stat label={c.headOfGovernmentTitle} value={hog ?? "vacant"} />
-        <Stat label="Approval" value={pct0(c.executive.approval)} tone={c.executive.approval > 50 ? "pos" : "neg"} />
-        <Stat label="Confidence" value={pct0(c.executive.confidence)} />
-        <Stat label="Coalition" value={`${c.executive.coalition.length} part${c.executive.coalition.length === 1 ? "y" : "ies"}`} />
-        <Stat label="Emergency powers" value={c.executive.emergencyPowers ? "In force" : "Not invoked"} tone={c.executive.emergencyPowers ? "neg" : ""} />
+        <Stat label={ex.headOfStateTitle} value={<span className="ink-text">{charName(characters, ex.headOfStateId)}</span>} />
+        {ex.headOfGovernmentId && ex.headOfGovernmentId !== ex.headOfStateId && <Stat label={ex.headOfGovernmentTitle} value={<span className="ink-text">{charName(characters, ex.headOfGovernmentId)}</span>} />}
+        <Stat label="Approval" value={pct0(ex.approval / 100)} tone={ex.approval >= 45 ? "pos" : "neg"} />
+        <Stat label="Stability" value={pct0(ex.confidence / 100)} />
+        {c.rulingPartyName && <Stat label="Ruling party" value={<span className="ink-text">{c.rulingPartyName}</span>} />}
+        {c.nextElectionAt !== undefined && start && <Stat label="Next election" value={simDate(start, c.nextElectionAt)} />}
+        {ex.emergencyPowers && <Stat label="State of emergency" value="In force" tone="neg" />}
+        {mine && (
+          <div className="row row--wrap" style={{ gap: 4, marginTop: 8 }}>
+            {c.nextElectionAt !== undefined && <button className="btn btn--sm" onClick={() => void act({ type: "call-election" })}>Call an election</button>}
+            {c.legislature && <button className="btn btn--sm btn--danger" onClick={() => void act({ type: "emergency-powers", value: !ex.emergencyPowers })}>{ex.emergencyPowers ? "End state of emergency" : "Rule by emergency decree"}</button>}
+          </div>
+        )}
       </div>
 
-      <Panel title={`Parties (${c.parties.length})`} defaultOpen>
-        <DataTable
-          rows={c.parties}
-          rowKey={(p) => p.id}
-          empty="No parties registered"
-          columns={[
-            {
-              id: "name",
-              label: "Party",
-              render: (p) => (
-                <span className="row" style={{ gap: 6 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: 2, background: p.color, display: "inline-block" }} />
-                  <span className="truncate">{p.abbreviation}</span>
-                  {p.status !== "outside" && <Chip tone={p.status === "government" ? "var(--positive)" : "var(--ink-muted)"}>{p.status === "ruling" ? "Ruling" : p.status}</Chip>}
-                </span>
-              ),
-            },
-            {
-              id: "seats",
-              label: "Seats",
-              right: true,
-              render: (p) => {
-                const ch = c.legislature?.chambers[0]?.id ?? "chamber-1";
-                return <span className="mono">{p.seats[ch] ?? 0}</span>;
-              },
-              sort: (a, b) => (b.seats[c.legislature?.chambers[0]?.id ?? "chamber-1"] ?? 0) - (a.seats[c.legislature?.chambers[0]?.id ?? "chamber-1"] ?? 0),
-            },
-            { id: "ideo", label: "Ideology", right: true, render: (p) => <span className="mono dim">{p.ideology > 0 ? "+" : ""}{p.ideology}</span>, sort: (a, b) => b.ideology - a.ideology },
-            { id: "coh", label: "Cohesion", right: true, render: (p) => <span className="mono">{pct0(p.cohesion / 100)}</span>, sort: (a, b) => b.cohesion - a.cohesion },
-            { id: "pop", label: "Polls", right: true, render: (p) => <span className="mono">{pct0(p.popularity / 100)}</span>, sort: (a, b) => b.popularity - a.popularity },
-            { id: "cash", label: "Funds", right: true, render: (p) => <span className="mono dim">{credits(p.treasury)}</span>, sort: (a, b) => b.treasury - a.treasury },
-          ]}
-        />
-      </Panel>
-
-      <Panel title={`Ministers (${c.executive.ministers.filter((m) => m.characterId).length}/${c.executive.ministers.length})`}>
-        <div className="stack">
-          {c.executive.ministers.map((m) => (
-            <div key={m.id} className="row" style={{ fontSize: 12 }}>
-              <span className="dim grow truncate">{m.title}</span>
-              <span className="mono">{m.characterId ?? "vacant"}</span>
-            </div>
-          ))}
-        </div>
-      </Panel>
-
-      <Panel title={`Unrest (${c.unrest.length})`}>
-        {c.unrest.length ? (
-          <div className="stack">
-            {c.unrest.map((u) => (
-              <div key={u.id} className="row" style={{ fontSize: 12 }}>
-                <span className="grow">{u.kind.replace(/-/g, " ")}</span>
-                <span className="mono">{Math.round(u.intensity)}</span>
-              </div>
-            ))}
-            <Stat label="Risk" value={pct0(c.unrestRisk)} tone={c.unrestRisk > 0.06 ? "neg" : ""} />
+      {chamber && (
+        <Panel title={`${chamber.name} · ${chamber.seats} seats`}>
+          <div className="seatbar" role="img" aria-label="Seats by party">
+            {c.parties.filter((p) => (p.seats[chamber.id] ?? 0) > 0).sort((a, b) => a.ideology - b.ideology).map((p) => <span key={p.id} title={`${p.name}: ${p.seats[chamber.id]}`} style={{ flex: p.seats[chamber.id] ?? 0, background: p.color }} />)}
           </div>
-        ) : (
-          <div className="dim" style={{ fontSize: 12 }}>Orderly.</div>
-        )}
+          <Stat label="Government majority" value={`${govSeats} of ${total}`} tone={govSeats > total / 2 ? "pos" : "neg"} />
+          <DataTable
+            rows={[...c.parties].sort((a, b) => (b.seats[chamber.id] ?? 0) - (a.seats[chamber.id] ?? 0))}
+            rowKey={(p) => p.id}
+            columns={[
+              { id: "n", label: "Party", render: (p) => <span className="row" style={{ gap: 5 }}><span style={{ width: 8, height: 8, background: p.color, borderRadius: 2, flex: "none" }} /><span className="truncate" title={p.name}>{p.name}</span>{ex.coalition.includes(p.id) && <Chip tone="var(--positive)">Gov</Chip>}</span> },
+              { id: "s", label: "Seats", right: true, render: (p) => <span className="mono">{p.seats[chamber.id] ?? 0}</span> },
+              { id: "v", label: "Polling", right: true, render: (p) => <span className="mono dim">{p.popularity.toFixed(0)}%</span> },
+            ]}
+          />
+        </Panel>
+      )}
+      {!chamber && <div className="dim" style={{ fontSize: 12 }}>{c.overlord ? "Run from the colonial power." : "No elected legislature. The ruler governs by decree."}</div>}
+
+      <Panel title="Cabinet">
+        {ex.ministers.filter((m) => m.characterId || mine).map((m) => (
+          <div className="row" key={m.id} style={{ fontSize: 12, padding: "2px 0" }}>
+            <span className="dim grow truncate">{m.title}</span>
+            <span className="truncate" style={{ maxWidth: 170 }}>{charName(characters, m.characterId)}</span>
+            {mine && <button className="btn btn--sm" onClick={() => { const name = prompt(`Who should be ${m.title}?`); if (name) void act({ type: "appoint", area: m.id, name }); }}>Appoint</button>}
+          </div>
+        ))}
+        {banker && <div className="row" style={{ fontSize: 12, padding: "2px 0" }}><span className="dim grow">Central Bank Governor</span><span>{banker.name}</span></div>}
+        {!mine && ex.ministers.every((m) => !m.characterId) && !banker && <div className="dim" style={{ fontSize: 12 }}>No cabinet ministers on record for this government.</div>}
       </Panel>
+
+      {countryBills.length > 0 && (
+        <Panel title="Legislation">
+          {countryBills.map((b) => {
+            const tally = b.tallies[b.chamberId];
+            return (
+              <div key={b.id} className="card" style={{ marginBottom: 6 }}>
+                <div className="row"><strong className="grow truncate" style={{ fontSize: 12 }}>{b.title}</strong><Chip tone={b.status === "enacted" ? "var(--positive)" : b.status === "rejected" ? "var(--negative)" : undefined}>{b.status.replace(/-/g, " ")}</Chip></div>
+                <div className="dim" style={{ fontSize: 11 }}>{b.summary}</div>
+                {tally && <div className="mono dim" style={{ fontSize: 11 }}>{tally.aye} for, {tally.nay} against</div>}
+              </div>
+            );
+          })}
+        </Panel>
+      )}
+
+      {c.unrest.filter((u) => !u.endedAt).length > 0 && (
+        <Panel title="Unrest">
+          {c.unrest.filter((u) => !u.endedAt).map((u) => <div key={u.id} className="row" style={{ fontSize: 12 }}><span className="grow">{u.kind.replace(/-/g, " ")}</span><span className="mono">{Math.round(u.intensity)}</span></div>)}
+        </Panel>
+      )}
     </div>
   );
 }
 
-function Chamber({ c, onAct, bills }: { c: Country; onAct?: (op: Record<string, unknown>) => void; bills: Record<string, Bill> }) {
-  const lg = c.legislature;
-  if (!lg) return <Empty>{c.name} has no legislature.</Empty>;
+function Foreign({ c, mine }: { c: Country; mine: boolean }) {
+  const countries = useStore((s) => s.countries);
+  const wars = useStore((s) => s.wars);
+  const treaties = useStore((s) => s.treaties);
+  const sanctions = useStore((s) => s.sanctions);
+  const player = useStore((s) => s.playerCountry);
+  const myTreaties = treaties.filter((t: Treaty) => t.parties.includes(c.id));
+  const myWars = wars.filter((w) => !w.endedAt && c.wars.includes(w.id));
+  const onMe = sanctions.filter((s: Sanction) => s.on === c.id);
+  const byMe = sanctions.filter((s: Sanction) => s.imposedBy.includes(c.id));
+  const rel = c.relations ?? {};
+  const ranked = Object.entries(rel).filter(([id]) => countries[id] && !countries[id].annexedBy).sort((a, b) => b[1] - a[1]);
+  const mineCountry = player ? countries[player] : undefined;
+  const dealingWithOther = !mine && mineCountry && !c.annexedBy;
+  const relationToMe = mineCountry ? c.relations?.[mineCountry.id] : undefined;
+
   return (
     <div className="stack">
-      {lg.chambers.map((ch) => {
-        const total = Object.values(c.parties).reduce((a, p) => a + (p.seats[ch.id] ?? 0), 0) || 1;
-        return (
-          <Panel key={ch.id} title={`${ch.name} · ${ch.seats} seats`}>
-            <div className="row dim" style={{ fontSize: 11, marginBottom: 6 }}>
-              {ch.kind} &middot; {ch.election.replace(/-/g, " ")} &middot; {ch.termDays}d term
-              {ch.moneyBills ? " · money bills" : ""}
-              {ch.confirmsAppointments ? " · confirms appointments" : ""}
-            </div>
-            <DataTable
-              rows={c.parties.filter((p) => (p.seats[ch.id] ?? 0) > 0)}
-              rowKey={(p) => p.id}
-              empty="No seats"
-              maxHeight={220}
-              columns={[
-                { id: "p", label: "Party", render: (p) => <span className="truncate">{p.name}</span> },
-                { id: "s", label: "Seats", right: true, render: (p) => <span className="mono">{p.seats[ch.id]}</span>, sort: (a, b) => (b.seats[ch.id] ?? 0) - (a.seats[ch.id] ?? 0) },
-                { id: "h", label: "Share", right: true, render: (p) => <span className="mono dim">{pct0((p.seats[ch.id] ?? 0) / total)}</span> },
-              ]}
-            />
-          </Panel>
-        );
-      })}
+      {dealingWithOther && (
+        <div className="card">
+          <div className="eyebrow" style={{ marginBottom: 6 }}>{mineCountry.name} and {c.name}</div>
+          <Stat label="Their view of you" value={relationToMe === undefined ? "--" : relationToMe.toFixed(0)} tone={(relationToMe ?? 0) >= 0 ? "pos" : "neg"} />
+          <div className="row row--wrap" style={{ gap: 4, marginTop: 6 }}>
+            <button className="btn btn--sm" onClick={() => void act({ type: "diplomatic-mission", partner: c.id })}>Send a mission</button>
+            <button className="btn btn--sm" onClick={() => void act({ type: "offer-treaty", partner: c.id, kind: "trade" })}>Trade deal</button>
+            <button className="btn btn--sm" onClick={() => void act({ type: "offer-treaty", partner: c.id, kind: "non-aggression" })}>Non-aggression</button>
+            <button className="btn btn--sm" onClick={() => void act({ type: "offer-treaty", partner: c.id, kind: "alliance" })}>Alliance</button>
+            <button className="btn btn--sm" onClick={() => void act({ type: "sanction", target: c.id, kind: "financial" })}>Sanction</button>
+            <button className="btn btn--sm btn--danger" onClick={() => { if (confirm(`Declare war on ${c.name}?`)) void act({ type: "declare-war", target: c.id, cause: `${mineCountry.name} presses its claims against ${c.name}.` }); }}>Declare war</button>
+          </div>
+        </div>
+      )}
+      {mine && <div className="dim" style={{ fontSize: 11 }}>Select another country on the map and open this tab to deal with it.</div>}
 
-      <Panel title={`Committees (${lg.committees.length})`} defaultOpen={false}>
-        <div className="stack">
-          {lg.committees.map((cm) => (
-            <div key={cm.id} className="row" style={{ fontSize: 12 }}>
-              <span className="grow truncate">{cm.name}</span>
-              <span className="dim mono">{cm.jurisdiction.join(", ")}</span>
-              <span className="mono" style={{ width: 40, textAlign: "right" }}>{Math.round(cm.power)}</span>
+      <Panel title={`Wars (${myWars.length})`}>
+        {!myWars.length && <div className="dim" style={{ fontSize: 12 }}>At peace.</div>}
+        {myWars.map((w) => (
+          <div key={w.id} className="card" style={{ marginBottom: 6 }}>
+            <strong style={{ fontSize: 12 }}>{w.name}</strong>
+            <div className="dim" style={{ fontSize: 11 }}>{w.cause}</div>
+            <Stat label="Exhaustion" value={Math.round(w.exhaustion[c.id] ?? 0)} />
+            {mine && w.belligerents[c.id] && <button className="btn btn--sm" style={{ marginTop: 4 }} onClick={() => void act({ type: "seek-peace", war: w.id })}>Seek peace</button>}
+          </div>
+        ))}
+      </Panel>
+      <Panel title={`Treaties (${myTreaties.length})`}>
+        {!myTreaties.length && <div className="dim" style={{ fontSize: 12 }}>No treaties in force.</div>}
+        {myTreaties.map((t) => (
+          <div key={t.id} className="row" style={{ fontSize: 12, padding: "2px 0" }}>
+            <span className="grow truncate" title={t.terms.join(" ")}>{t.name}</span>
+            {mine && <button className="btn btn--sm" onClick={() => void act({ type: "leave-treaty", id: t.id })}>Leave</button>}
+          </div>
+        ))}
+      </Panel>
+      {(onMe.length > 0 || byMe.length > 0) && (
+        <Panel title="Sanctions">
+          {onMe.map((s) => <div key={s.id} style={{ fontSize: 12 }}>From {s.imposedBy.map((b) => countries[b]?.name ?? b).join(", ")}: {s.kind}, {s.scope}% coverage</div>)}
+          {byMe.map((s) => (
+            <div key={s.id} className="row" style={{ fontSize: 12 }}>
+              <span className="grow">On {countries[s.on]?.name ?? s.on}: {s.kind}</span>
+              {mine && <button className="btn btn--sm" onClick={() => void act({ type: "lift-sanction", id: s.id })}>Lift</button>}
             </div>
           ))}
-        </div>
-      </Panel>
-
-      <Panel title={`Bills (${lg.activeBills.length})`}>
-        {lg.activeBills.length ? (
-          <div className="stack">
-            {lg.activeBills.slice(-12).map((id) => {
-              const b = bills[id];
-              if (!b) return null;
-              return (
-                <div key={id} className="card">
-                  <div className="row">
-                    <span className="grow truncate" style={{ fontSize: 12.5 }}>{b.title}</span>
-                    <Chip>{b.status.replace(/-/g, " ")}</Chip>
-                  </div>
-                  <div className="dim" style={{ fontSize: 11, marginTop: 3 }}>{b.summary}</div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="dim" style={{ fontSize: 12 }}>No bills before the house.</div>
-        )}
-        {onAct && (
-          <div className="row row--wrap" style={{ marginTop: 10, gap: 6 }}>
-            <button
-              className="btn btn--sm"
-              onClick={() => {
-                const title = prompt("Bill title") ?? "Budget Measures";
-                const cost = Number(prompt("Annual cost (credits)", "0") ?? 0);
-                const area = prompt("Policy area (economy, defence, health, welfare, education, tax, technology)", "economy") ?? "economy";
-                const effect = Number(prompt("Growth effect per year, e.g. 0.01", "0.01") ?? 0.01);
-                onAct({
-                  type: "introduce-bill",
-                  country: c.id,
-                  title,
-                  summary: `${area} package costing ${credits(cost)} a year.`,
-                  body: "",
-                  category: cost > 0 ? "money" : "ordinary",
-                  sponsorId: c.executive.headOfGovernmentId ?? "",
-                  sponsorPartyId: c.executive.coalition[0] ?? "",
-                  cost,
-                  effects: { sectorGrowth: { [sectorForPolicy(area)]: effect } },
-                });
-              }}
-            >
-              Draft a bill
-            </button>
-            <button className="btn btn--sm" onClick={() => onAct({ type: "raise-referendum", country: c.id, question: prompt("Referendum question?", "Shall the current government continue in office?") })}>Call referendum</button>
-          </div>
-        )}
-      </Panel>
-
-      <Panel title="Elections" defaultOpen={false}>
-        {c.elections.filter((e) => e.status !== "complete").length ? (
-          <div className="stack">
-            {c.elections.filter((e) => e.status !== "complete").map((e) => (
-              <div key={e.id} className="card">
-                <div className="row"><span className="grow">{lg.chambers.find((ch) => ch.id === e.chamberId)?.name}</span><Chip>{e.status}</Chip></div>
-                <Stat label="Counted" value={`${Object.keys(e.votes).length}/${e.districtCount}`} />
-                <Stat label="Enthusiasm" value={pct0(e.enthusiasm / 100)} />
-                <div className="stack" style={{ marginTop: 6 }}>
-                  {Object.entries(e.projection).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([pid, n]) => (
-                    <div key={pid}>
-                      <div className="row" style={{ justifyContent: "space-between", fontSize: 11 }}>
-                        <span className="truncate">{c.parties.find((p) => p.id === pid)?.abbreviation ?? pid}</span>
-                        <span className="mono">{Math.round(n)}</span>
-                      </div>
-                      <Bar value={n} max={lg.chambers.find((ch) => ch.id === e.chamberId)?.seats ?? 1} />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="dim" style={{ fontSize: 12 }}>No election in progress.</div>
-        )}
-      </Panel>
+        </Panel>
+      )}
+      {ranked.length > 0 && (
+        <Panel title="Relations" defaultOpen={false}>
+          <div className="eyebrow">Closest</div>
+          {ranked.slice(0, 8).map(([id, v]) => <div key={id} className="row" style={{ justifyContent: "space-between", fontSize: 12 }}><span className="truncate">{countries[id].name}</span><span className="mono pos">{v.toFixed(0)}</span></div>)}
+          <div className="eyebrow" style={{ marginTop: 6 }}>Most hostile</div>
+          {ranked.slice(-8).reverse().map(([id, v]) => <div key={id} className="row" style={{ justifyContent: "space-between", fontSize: 12 }}><span className="truncate">{countries[id].name}</span><span className="mono neg">{v.toFixed(0)}</span></div>)}
+        </Panel>
+      )}
     </div>
   );
 }
 
-function sectorForPolicy(area: string): string {
-  return { economy: "manufacturing", defence: "defence", health: "healthcare", welfare: "healthcare", education: "education", tax: "finance", technology: "technology", energy: "energy", transport: "transport", agriculture: "agriculture", housing: "real-estate", environment: "agriculture", labour: "manufacturing", justice: "finance", immigration: "retail", "foreign-policy": "defence" }[area] ?? "manufacturing";
-}
-
-function Military({ c }: { c: Country }) {
+function Military({ c, mine }: { c: Country; mine: boolean }) {
   const m = c.military;
-  const burden = m.burden;
   return (
     <div className="stack">
       <div className="card">
         <Stat label="Active duty" value={people(m.activeDuty)} />
         <Stat label="Reserves" value={people(m.reserves)} />
-        <Stat label="Annual spend" value={credits(m.spend)} />
-        <Stat label="Burden (share of GDP)" value={pct(burden)} tone={burden > 0.04 ? "neg" : ""} />
-        <Stat label="Readiness" value={pct0(m.readiness)} tone={m.readiness > 60 ? "pos" : "neg"} />
-        <Stat label="Morale" value={pct0(m.morale)} />
-        <Stat label="Doctrine" value={m.doctrine < -20 ? "Defensive" : m.doctrine > 30 ? "Offensive" : "Balanced"} />
-        <Stat label="Conscription" value={m.conscription ? "In force" : "Abolished"} />
-        {c.nukes > 0 && <Stat label="Nuclear warheads" value={people(c.nukes)} tone="neg" />}
+        <Stat label="Annual budget" value={`$${credits(c.economy.fiscal.military)}`} />
+        <Stat label="Share of GDP" value={pct(c.economy.fiscal.military / c.economy.gdp)} />
+        <Stat label="Readiness" value={pct0(m.readiness / 100)} tone={m.readiness > 60 ? "pos" : "neg"} />
+        <Stat label="Morale" value={pct0(m.morale / 100)} />
+        <Stat label="Conscription" value={m.conscription ? "In force" : "None"} />
+        {c.nukes > 0 && <Stat label="Nuclear warheads" value={people(c.nukes)} />}
       </div>
-      <Panel title="Branches">
-        <DataTable
-          rows={Object.entries(m.branches).map(([k, v]) => ({ k, ...v }))}
-          rowKey={(r) => r.k}
-          columns={[
-            { id: "b", label: "Branch", render: (r) => r.k.replace(/-/g, " ") },
-            { id: "a", label: "Active", right: true, render: (r) => <span className="mono">{people(r.active)}</span> },
-            { id: "q", label: "Quality", right: true, render: (r) => <span className="mono">{Math.round(r.quality)}</span>, sort: (a, b) => b.quality - a.quality },
-          ]}
-        />
-      </Panel>
-    </div>
-  );
-}
-
-function Trade({ c }: { c: Country }) {
-  const t = c.economy.trade;
-  const partners = Object.entries(t.flows).sort((a, b) => b[1] - a[1]).slice(0, 18);
-  return (
-    <div className="stack">
-      <div className="card">
-        <Stat label="Exports" value={credits(t.exports)} />
-        <Stat label="Imports" value={credits(t.imports)} />
-        <Stat label="Balance" value={signedPct((t.tradeBalance / Math.max(1, c.economy.gdp)), 2)} tone={t.tradeBalance >= 0 ? "pos" : "neg"} />
-        <Stat label="Openness" value={pct0(t.tradeOpenness / 100)} />
-        <Stat label="Tariff" value={pct(t.tariffRate)} />
-      </div>
-      <Panel title="Largest partners">
-        <DataTable
-          rows={partners}
-          rowKey={([iso]) => iso}
-          empty="No recorded trade"
-          maxHeight={340}
-          columns={[
-            { id: "p", label: "Partner", render: ([iso]) => iso },
-            { id: "v", label: "Volume", right: true, render: ([, v]) => <span className="mono">{credits(v)}</span>, sort: (a, b) => b[1] - a[1] },
-          ]}
-        />
-      </Panel>
+      {mine && (
+        <div className="row row--wrap" style={{ gap: 4 }}>
+          <button className="btn btn--sm" disabled={m.reserves <= 0} onClick={() => void act({ type: "military", mobilise: 0.25 })}>Mobilise 25% of reserves</button>
+          <button className="btn btn--sm" onClick={() => void act({ type: "military", conscription: !m.conscription })}>{m.conscription ? "End conscription" : "Introduce conscription"}</button>
+        </div>
+      )}
+      <DataTable
+        rows={Object.entries(m.branches).filter(([, v]) => v.active > 0).map(([k, v]) => ({ k, ...v }))}
+        rowKey={(r) => r.k}
+        columns={[
+          { id: "b", label: "Branch", render: (r) => r.k.replace(/-/g, " ") },
+          { id: "a", label: "Strength", right: true, render: (r) => <span className="mono">{people(r.active)}</span> },
+          { id: "q", label: "Quality", right: true, render: (r) => <span className="mono">{Math.round(r.quality)}</span> },
+        ]}
+      />
     </div>
   );
 }
 
 // ===========================================================================
-// Markets panel
+// Markets
 // ===========================================================================
-
-export function MarketPanel({ markets, companies, onTrade }: { markets: MarketState | null; companies: Record<string, Company>; onTrade?: (companyId: string, side: "buy" | "sell", shares: number) => void }) {
-  const [sort, setSort] = useState<"cap" | "ret" | "rev">("cap");
-  if (!markets) return <Empty>Loading markets</Empty>;
-  const listed = Object.values(companies).filter((c) => c.listed && !c.insolvent && !c.banned);
-  const sorted = [...listed].sort((a, b) =>
-    sort === "cap" ? b.valuation - a.valuation : sort === "rev" ? b.revenue - a.revenue : ret(b) - ret(a),
-  );
-
-  return (
-    <div className="scroll pad">
-      <div className="card">
-        <div className="eyebrow" style={{ marginBottom: 6 }}>Global</div>
-        <Stat label="Sentiment" value={markets.sentiment} tone={markets.sentiment === "euphoric" ? "pos" : markets.sentiment === "crash" ? "neg" : ""} />
-        <Stat label="Risk appetite" value={pct0(markets.riskAppetite / 100)} />
-        <Stat label="Credit spreads" value={pct(markets.creditSpreads, 2)} tone={markets.creditSpreads > 0.06 ? "neg" : ""} />
-      </div>
-
-      <Panel title="Exchanges" defaultOpen>
-        <DataTable
-          rows={markets.exchanges}
-          rowKey={(e) => e.id}
-          maxHeight={260}
-          columns={[
-            { id: "n", label: "Exchange", render: (e) => <span className="truncate">{e.name}</span> },
-            { id: "i", label: "Index", right: true, render: (e) => <span className="mono">{e.index.toFixed(0)}</span>, sort: (a, b) => b.index - a.index },
-            { id: "r", label: "1y", right: true, render: (e) => <span className={deltaClass(e.index / e.indexYearAgo - 1)}>{signedPct(e.index / e.indexYearAgo - 1, 0)}</span>, sort: (a, b) => b.index / b.indexYearAgo - a.index / a.indexYearAgo },
-          ]}
-        />
-      </Panel>
-
-      <Panel title="Commodities" defaultOpen>
-        <div className="stack">
-          {Object.entries(markets.commodityPrices).map(([k, v]) => (
-            <div key={k} className="row" style={{ justifyContent: "space-between", fontSize: 12 }}>
-              <span className="dim">{k.replace(/-/g, " ")}</span>
-              <span className="mono">{money(v, v < 10 ? 2 : 0)}</span>
-            </div>
-          ))}
-        </div>
-      </Panel>
-
-      <Panel title={`Listed companies (${listed.length})`} defaultOpen>
-        <div className="row" style={{ marginBottom: 6, gap: 6 }}>
-          {(["cap", "rev", "ret"] as const).map((s) => (
-            <button key={s} className={`btn btn--sm ${sort === s ? "btn--active" : ""}`} onClick={() => setSort(s)}>
-              {s === "cap" ? "Market cap" : s === "rev" ? "Revenue" : "Return"}
-            </button>
-          ))}
-        </div>
-        <DataTable
-          rows={sorted.slice(0, 120)}
-          rowKey={(c) => c.id}
-          empty="Nothing listed"
-          maxHeight={520}
-          columns={[
-            { id: "n", label: "Company", render: (c) => <span className="row" style={{ gap: 5 }}><span className="truncate">{c.name}</span>{c.stateOwnership > 0.5 && <Chip tone="var(--ink-muted)">SOE</Chip>}</span> },
-            { id: "c", label: "Country", render: (c) => <span className="dim">{c.country}</span> },
-            { id: "cap", label: "Cap", right: true, render: (c) => <span className="mono">{credits(c.valuation)}</span>, sort: (a, b) => b.valuation - a.valuation },
-            { id: "r", label: "Return", right: true, render: (c) => <span className={deltaClass(ret(c))}>{signedPct(ret(c), 0)}</span>, sort: (a, b) => ret(b) - ret(a) },
-            ...(onTrade
-              ? [{
-                  id: "t",
-                  label: "",
-                  right: true,
-                  render: (c: Company) => (
-                    <span className="row" style={{ gap: 4 }}>
-                      <button className="btn btn--sm" onClick={(e) => { e.stopPropagation(); const n = Number(prompt("Shares", "1000")); if (n > 0) onTrade(c.id, "buy", n); }}>Buy</button>
-                      <button className="btn btn--sm" onClick={(e) => { e.stopPropagation(); const n = Number(prompt("Shares", "1000")); if (n > 0) onTrade(c.id, "sell", n); }}>Sell</button>
-                    </span>
-                  ),
-                }]
-              : []),
-          ]}
-        />
-      </Panel>
-    </div>
-  );
-}
 
 const ret = (c: Company) => c.sharePrice / Math.max(0.01, c.sharePriceYearAgo) - 1;
 
-// ===========================================================================
-// Wars panel
-// ===========================================================================
-
-export function WarPanel({ wars, countries, onDeclare }: { wars: War[]; countries: Record<string, Country>; onDeclare?: () => void }) {
-  const active = wars.filter((w) => !w.endedAt);
-  const ended = wars.filter((w) => w.endedAt);
+export function MarketPanel({ markets, companies }: { markets: MarketState | null; companies: Record<string, Company> }) {
+  const [sort, setSort] = useState<"cap" | "ret" | "rev">("cap");
+  const countries = useStore((s) => s.countries);
+  const player = useStore((s) => s.playerCountry);
+  const [open, setOpen] = useState<string | null>(null);
+  if (!markets) return <Empty>Loading markets</Empty>;
+  const all = Object.values(companies).filter((c) => !c.insolvent && !c.banned);
+  const sorted = [...all].sort((a, b) => (sort === "cap" ? b.valuation - a.valuation : sort === "rev" ? b.revenue - a.revenue : ret(b) - ret(a)));
+  const selected = open ? companies[open] : undefined;
   return (
-    <div className="scroll pad">
-      <div className="row" style={{ marginBottom: 10 }}>
-        <Chip tone={active.length ? "var(--negative)" : "var(--positive)"}>{active.length} active</Chip>
-        <Chip>{ended.length} concluded</Chip>
-        {onDeclare && <button className="btn btn--sm btn--danger" style={{ marginLeft: "auto" }} onClick={onDeclare}>Declare war</button>}
+    <div className="scroll pad grow" style={{ minHeight: 0 }}>
+      <div className="card">
+        <div className="eyebrow" style={{ marginBottom: 6 }}>Global conditions</div>
+        <Stat label="Sentiment" value={markets.sentiment} tone={markets.sentiment === "euphoric" || markets.sentiment === "bullish" ? "pos" : markets.sentiment === "crash" || markets.sentiment === "bearish" ? "neg" : ""} />
+        <Stat label="Risk appetite" value={pct0(markets.riskAppetite / 100)} />
+        <Stat label="Credit spreads" value={pct(markets.creditSpreads, 2)} tone={markets.creditSpreads > 0.05 ? "neg" : ""} />
       </div>
-
-      {!wars.length && <Empty>No conflicts on Earth.</Empty>}
-
-      {active.map((w) => {
-        const sides = Object.keys(w.belligerents);
-        const total = sides.reduce((a, s) => a + Math.abs(frontBalance(w, s)), 0) || 1;
-        return (
-          <div key={w.id} className="card" style={{ marginBottom: 10 }}>
-            <div className="row">
-              <strong className="grow">{w.name}</strong>
-              <Chip tone="var(--negative)">{w.phase.replace(/-/g, " ")}</Chip>
+      <Panel title="Commodities">
+        <div className="stack">
+          {Object.entries(markets.commodityPrices).map(([k, v]) => (
+            <div key={k} className="row" style={{ justifyContent: "space-between", fontSize: 12 }}>
+              <span className="dim">{COMMODITY_LABELS[k as keyof typeof COMMODITY_LABELS] ?? k}</span>
+              <span className="mono">${money(v, v < 10 ? 2 : 0)}</span>
             </div>
-            <div className="dim" style={{ fontSize: 11.5, margin: "4px 0 8px" }}>{w.cause}</div>
-            <div className="stack">
-              {sides.map((s) => {
-                const bal = frontBalance(w, s);
-                return (
-                  <div key={s}>
-                    <div className="row" style={{ justifyContent: "space-between", fontSize: 11.5 }}>
-                      <span className="truncate">{countries[s]?.name ?? s}</span>
-                      <span className="mono dim">exhaustion {Math.round(w.exhaustion[s] ?? 0)}</span>
-                    </div>
-                    <Bar value={Math.abs(bal)} max={total} tone={bal > 0 ? "var(--positive)" : "var(--negative)"} />
-                  </div>
-                );
-              })}
-            </div>
-            <div className="dim" style={{ fontSize: 11, marginTop: 8 }}>
-              {w.fronts.map((f) => `${f.name} (${f.terrain}, control ${Math.round(f.control)})`).join(" · ")}
-            </div>
-            <Stat label="Casualties" value={Object.values(w.casualties).reduce((a, b) => a + b, 0).toLocaleString()} />
-            <Stat label="Public support" value={Object.values(w.publicSupport).map((v) => `${Math.round(v)}`).join(" / ")} />
-            {w.warGoal && <div className="dim" style={{ fontSize: 11, marginTop: 4 }}>War goal: {w.warGoal}</div>}
-          </div>
-        );
-      })}
+          ))}
+        </div>
+      </Panel>
+      {markets.exchanges.length > 0 && (
+        <Panel title="Exchanges">
+          <DataTable
+            rows={markets.exchanges}
+            rowKey={(e) => e.id}
+            columns={[
+              { id: "n", label: "Exchange", render: (e) => <span className="truncate" title={e.name}>{e.name}</span> },
+              { id: "i", label: "Index", right: true, render: (e) => <span className="mono">{e.index.toFixed(0)}</span> },
+              { id: "r", label: "1y", right: true, render: (e) => <span className={`mono ${deltaClass(e.index / e.indexYearAgo - 1)}`}>{signedPct(e.index / e.indexYearAgo - 1, 0)}</span> },
+            ]}
+          />
+        </Panel>
+      )}
+      <Panel title={`Corporations (${all.length})`}>
+        <div className="row" style={{ marginBottom: 6, gap: 6 }}>
+          {(["cap", "rev", "ret"] as const).map((s) => <button key={s} className={`btn btn--sm ${sort === s ? "btn--active" : ""}`} onClick={() => setSort(s)}>{s === "cap" ? "Market value" : s === "rev" ? "Revenue" : "1y return"}</button>)}
+        </div>
+        <DataTable<Company>
+          rows={sorted.slice(0, 120)}
+          rowKey={(c) => c.id}
+          onRow={(c) => setOpen(open === c.id ? null : c.id)}
+          columns={[
+            { id: "n", label: "Company", render: (c) => <span className="truncate" title={c.name}>{c.name}</span> },
+            { id: "c", label: "Home", render: (c) => <span className="dim truncate">{countries[c.country]?.name ?? c.country}</span> },
+            { id: "cap", label: "Value", right: true, render: (c) => <span className="mono">${credits(c.valuation)}</span> },
+            { id: "r", label: "1y", right: true, render: (c) => <span className={`mono ${deltaClass(ret(c))}`}>{signedPct(ret(c), 0)}</span> },
+          ]}
+        />
+        {selected && <div style={{ marginTop: 8 }}><CompanyCard co={selected} mine={selected.country === player} /></div>}
+      </Panel>
     </div>
   );
 }
 
-function frontBalance(w: War, side: string): number {
-  let v = 0;
-  for (const f of w.fronts) {
-    const i = f.belligerents.indexOf(side);
-    if (i === 0) v += f.control;
-    else if (i === 1) v -= f.control;
-  }
-  return v;
+// ===========================================================================
+// Wars
+// ===========================================================================
+
+export function WarPanel({ wars, countries, onPick }: { wars: War[]; countries: Record<string, Country>; onPick: (id: string) => void }) {
+  const active = wars.filter((w) => !w.endedAt);
+  const ended = wars.filter((w) => w.endedAt);
+  const name = (w: War, id: string) => countries[id]?.name ?? w.rebels?.[id]?.name ?? id;
+  return (
+    <div className="scroll pad grow" style={{ minHeight: 0 }}>
+      <div className="row" style={{ marginBottom: 10 }}>
+        <Chip tone={active.length ? "var(--negative)" : "var(--positive)"}>{active.length} active</Chip>
+        <Chip>{ended.length} concluded</Chip>
+      </div>
+      {!wars.length && <Empty>The world is at peace.</Empty>}
+      {active.map((w) => (
+        <div key={w.id} className="card" style={{ marginBottom: 10 }}>
+          <strong>{w.name}</strong>
+          <div className="dim" style={{ fontSize: 11.5, margin: "4px 0 8px" }}>{w.cause}</div>
+          {Object.keys(w.belligerents).map((s) => (
+            <div key={s} className="row" style={{ justifyContent: "space-between", fontSize: 11.5, cursor: countries[s] ? "pointer" : undefined }} onClick={() => countries[s] && onPick(s)}>
+              <span className="truncate">{name(w, s)}</span>
+              <span className="mono dim">exhausted {Math.round(w.exhaustion[s] ?? 0)}%</span>
+            </div>
+          ))}
+          {w.fronts.map((f) => (
+            <div key={f.id} style={{ marginTop: 6 }}>
+              <div className="row" style={{ justifyContent: "space-between", fontSize: 11 }}><span className="dim truncate">{f.name}</span></div>
+              <div className="front" title={`${name(w, f.belligerents[0])} on the left`}>
+                <span style={{ width: `${(f.control + 100) / 2}%`, background: countries[f.belligerents[0]]?.mapColor ?? "var(--accent-2)" }} />
+                <span style={{ flex: 1, background: countries[f.belligerents[1]]?.mapColor ?? "var(--ink-muted)" }} />
+              </div>
+            </div>
+          ))}
+          <Stat label="Casualties" value={Math.round(Object.values(w.casualties).reduce((a, b) => a + b, 0)).toLocaleString("en-US")} />
+        </div>
+      ))}
+      {ended.length > 0 && (
+        <Panel title="Concluded" defaultOpen={false}>
+          {ended.map((w) => <div key={w.id} style={{ fontSize: 12 }}>{w.name}{w.outcome ? `: ${w.outcome.replace(/-/g, " ")}` : ""}</div>)}
+        </Panel>
+      )}
+    </div>
+  );
 }
 
 // ===========================================================================
 // Rankings
 // ===========================================================================
 
-export function RankingPanel({ countries, metric, onPick }: { countries: Record<string, Country>; metric: string; onPick: (iso3: string) => void }) {
-  const rows = useMemo(() => Object.values(countries).filter((c) => !c.annexedBy), [countries]);
-  const val = (c: Country): number => {
-    switch (metric) {
-      case "gdp": return c.economy.gdp;
-      case "gdpPc": return c.economy.gdpPerCapita;
-      case "growth": return c.economy.gdpGrowth;
-      case "inflation": return c.economy.monetary.inflation;
-      case "unemployment": return c.economy.labour.unemployment;
-      case "debt": return c.economy.fiscal.debtToGdp;
-      case "approval": return c.executive.approval;
-      case "military": return c.military.activeDuty;
-      case "unrest": return c.unrestRisk;
-      default: return c.economy.gdp;
-    }
-  };
-  const sorted = [...rows].sort((a, b) => val(b) - val(a));
-  const fmt = (v: number) =>
-    metric === "gdp" || metric === "gdpPc" || metric === "military" ? credits(v)
-    : metric === "approval" ? String(Math.round(v))
-    : pct(v, 2);
+const METRICS: { id: string; label: string; get: (c: Country) => number; fmt: (v: number) => string }[] = [
+  { id: "gdp", label: "GDP", get: (c) => c.economy.gdp, fmt: (v) => `$${credits(v)}` },
+  { id: "gdpPc", label: "Per person", get: (c) => c.economy.gdpPerCapita, fmt: (v) => `$${money(v, 0)}` },
+  { id: "growth", label: "Growth", get: (c) => c.economy.gdpGrowth, fmt: (v) => signedPct(v, 1) },
+  { id: "inflation", label: "Inflation", get: (c) => c.economy.monetary.inflation, fmt: (v) => signedPct(v, 1) },
+  { id: "unemployment", label: "Jobless", get: (c) => c.economy.labour.unemployment, fmt: (v) => pct(v) },
+  { id: "debt", label: "Debt", get: (c) => c.economy.fiscal.debtToGdp, fmt: (v) => pct0(v) },
+  { id: "approval", label: "Approval", get: (c) => c.executive.approval, fmt: (v) => `${v.toFixed(0)}%` },
+  { id: "military", label: "Military", get: (c) => c.military.activeDuty, fmt: (v) => people(v) },
+];
 
+export function RankingPanel({ countries, onPick }: { countries: Record<string, Country>; onPick: (id: string) => void }) {
+  const [metric, setMetric] = useState("gdp");
+  const m = METRICS.find((x) => x.id === metric) ?? METRICS[0];
+  const rows = useMemo(() => Object.values(countries).filter((c) => !c.annexedBy).sort((a, b) => m.get(b) - m.get(a)).slice(0, 100), [countries, m]);
   return (
-    <div className="scroll pad">
+    <div className="scroll pad grow" style={{ minHeight: 0 }}>
       <div className="row row--wrap" style={{ marginBottom: 10, gap: 4 }}>
-        {["gdp", "gdpPc", "growth", "inflation", "unemployment", "debt", "approval", "military", "unrest"].map((m) => (
-          <button key={m} className={`btn btn--sm ${metric === m ? "btn--active" : ""}`} onClick={() => onPick(m)} style={{ display: "none" }} />
-        ))}
+        {METRICS.map((x) => <button key={x.id} className={`btn btn--sm ${metric === x.id ? "btn--active" : ""}`} onClick={() => setMetric(x.id)}>{x.label}</button>)}
       </div>
       <DataTable<Country>
-        rows={sorted.slice(0, 100)}
+        rows={rows}
         rowKey={(c) => c.id}
         onRow={(c) => onPick(c.id)}
-        maxHeight={620}
         columns={[
-          { id: "n", label: "Country", render: (c) => <span className="row" style={{ gap: 6 }}><span>{c.flagEmoji}</span><span className="truncate">{c.name}</span>{c.overlord && <span className="dim" style={{ fontSize: 10 }}>· dependency</span>}</span> },
-          { id: "v", label: metric.toUpperCase(), right: true, render: (c) => <span className="mono">{fmt(val(c))}</span>, sort: (a, b) => val(b) - val(a) },
+          { id: "n", label: "Country", render: (c) => <span className="row" style={{ gap: 6 }}><Flag c={c} size={11} /><span className="truncate">{c.name}</span></span> },
+          { id: "v", label: m.label, right: true, render: (c) => <span className="mono">{m.fmt(m.get(c))}</span> },
         ]}
       />
     </div>
   );
 }
 
-export { SECTOR_ORDER };
+export { can, YEAR };

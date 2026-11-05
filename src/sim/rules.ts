@@ -1,6 +1,6 @@
 import type { CustomRule, PolicyArea, RuleAction, RuleCondition, World, WorldDirective } from "../shared/types";
 import { annex, declareWar, imposeSanction } from "./step-world";
-import { buildCountry, pushEvent, slug } from "./bootstrap";
+import { pushEvent, slug, spawnPolity } from "./bootstrap";
 import { addNum, getNum, setNum } from "./paths";
 import { Rng, clamp } from "./rng";
 
@@ -429,7 +429,8 @@ function runLine(world: World, line: string): string | null {
         const id = args[0];
         if (!id) return null;
         if (!world.customCountries[id]) {
-          const c = buildCountry(id.toUpperCase().slice(0, 3), [id, id.toUpperCase().slice(0, 3), "XX", args[1] ?? id, args[1] ?? id, "Europe", "europe", "parliamentary-republic", 10, 20000, -10, "none"], new Rng(world.seed ^ id.length), { scen: { params: world.params } as never }, []);
+          const { country: c, characters } = spawnPolity(world, id, args[1] ?? id);
+          for (const ch of characters) world.characters[ch.id] = ch;
           world.customCountries[id] = c;
           world.countries[id] = c;
           for (const p of c.parties) world.parties[p.id] = p;

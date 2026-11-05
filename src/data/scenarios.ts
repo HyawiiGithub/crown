@@ -19,7 +19,7 @@ export const DEFAULT_PARAMS: SimulationParams = {
   bankruptcyThreshold: 1.15,
   marketBeta: 22,
   marketVolatility: 0.9,
-  crashProbability: 0.0009,
+  crashProbability: 0.0007,
   tradeElasticity: 1.6,
   warDamage: 0.00042,
   crisisProbability: 0.0026,
@@ -62,10 +62,10 @@ export const SCENARIOS: Scenario[] = [
     name: "The Age of Empires",
     tagline: "Victoria reigns. The sun never sets, and every capital is a ledger.",
     description:
-      "The world is at the height of European imperialism. Four empires cover a third of the planet, Britain alone administers a quarter of humanity, and the money is on the London and New York exchanges. There is no League of Nations and no international law worth the paper it is printed on. Everything here can be lost, and roughly eighty years from now, everything here will be.",
+      "New Year's Day 1900. European empires hold most of the planet and Britain alone administers a quarter of humanity. The gold standard ties the world's money together, Boer commandos are besieging British garrisons in South Africa, and the Boxers are gathering in northern China. Every empire on this map believes it will last.",
     epoch: 0,
     startDate: { year: 1900, month: 1, day: 1 },
-    daysPerSecond: 0.06,
+    daysPerSecond: 1,
     theme: {
       tokens: {
         "--bg": "#f3ede0",
@@ -99,12 +99,12 @@ export const SCENARIOS: Scenario[] = [
     id: "1914",
     year: 1914,
     name: "The War to End All Wars",
-    tagline: "The guns are already loaded. It is July, and nobody in the counting houses believes a word of it.",
+    tagline: "The Archduke is dead. It is June, and nobody in the counting houses believes a war is coming.",
     description:
-      "Europe is one assassination deep into a general war. Mobilisation timetables have made diplomacy meaningless, colonial subjects are being told to fight for empires they have never seen, and the economic system that will break the war is the same one that built the rail networks it will be fought over. The Triple Entente and the Triple Alliance are both about to discover what they actually promised.",
+      "28 June 1914. Archduke Franz Ferdinand has just been shot in Sarajevo. In a month Austria-Hungary will declare war on Serbia, and the alliance system will pull in Russia, Germany, France and Britain within days, unless you stop it. The gold standard and the longest era of globalisation yet are about to end.",
     epoch: 0,
     startDate: { year: 1914, month: 6, day: 28 },
-    daysPerSecond: 0.07,
+    daysPerSecond: 1,
     theme: {
       tokens: {
         "--bg": "#d9cfb8",
@@ -128,7 +128,7 @@ export const SCENARIOS: Scenario[] = [
       texture: "newsprint",
       masthead: "THE WAR EDITION",
     },
-    params: g({ seed: 19140628, growthSmoothing: 0.05, marketVolatility: 3.4, crashProbability: 0.007, debtInterestBase: 0.045, inflationTarget: 0.015, warDamage: 0.00085, eventRate: 2.2, fiscalMultiplier: 1.9, debtInterestRisk: 0.12, bankruptcyThreshold: 0.9 }),
+    params: g({ seed: 19140628, growthSmoothing: 0.05, marketVolatility: 3.4, crashProbability: 0.0012, debtInterestBase: 0.045, inflationTarget: 0.015, warDamage: 0.00085, eventRate: 1.3, fiscalMultiplier: 1.9, debtInterestRisk: 0.12, bankruptcyThreshold: 0.9 }),
     overrides: { global: { commodityPrices: { gold: 18.6, oil: 0.9, wheat: 0.42, copper: 3.2 }, riskAppetite: 34 } },
     tags: ["total-war", "empire", "mobilisation", "gold-standard"],
   },
@@ -138,12 +138,12 @@ export const SCENARIOS: Scenario[] = [
     id: "1930",
     year: 1930,
     name: "The Interwar Years",
-    tagline: "Four empires gone in four years. The money is on the floor and nobody has picked it up.",
+    tagline: "Wall Street crashed four months ago. Nobody yet knows how far this goes.",
     description:
-      "The Dow is recovering from a crash that killed a generation of savers, reparations are still draining Germany, and the political centre has emptied out across Europe. Mass suffrage is new, the franchise has doubled, and the parties that will exploit it are assembling. The League of Nations exists. Its mandates are already being called spoils.",
+      "March 1930. Wall Street crashed in October and most governments think the slump will be short. Germany's Grand Coalition is about to fall, Stalin is collectivising the Soviet countryside, and the gold standard forces countries to tighten into the downturn. The League of Nations still exists, and its mandates cover the Middle East.",
     epoch: 0,
     startDate: { year: 1930, month: 3, day: 1 },
-    daysPerSecond: 0.07,
+    daysPerSecond: 1,
     theme: {
       tokens: {
         "--bg": "#14181c",
@@ -167,7 +167,7 @@ export const SCENARIOS: Scenario[] = [
       texture: "blueprint",
       masthead: "CROWN QUARTERLY",
     },
-    params: g({ seed: 19300301, growthSmoothing: 0.06, marketVolatility: 2.6, crashProbability: 0.005, debtInterestBase: 0.055, inflationTarget: 0.0, debtInterestRisk: 0.11, bankruptcyThreshold: 0.95, warDamage: 0.0007, eventRate: 1.6 }),
+    params: g({ seed: 19300301, growthSmoothing: 0.06, marketVolatility: 2.6, crashProbability: 0.001, debtInterestBase: 0.055, inflationTarget: 0.0, debtInterestRisk: 0.11, bankruptcyThreshold: 0.95, warDamage: 0.0007, eventRate: 1.2 }),
     overrides: { global: { commodityPrices: { gold: 20.7, oil: 0.27, wheat: 0.44, copper: 1.4, coal: 0.15 }, riskAppetite: 28 } },
     tags: ["great-depression", "mass-suffrage", "mandates", "art-deco"],
   },
@@ -177,12 +177,12 @@ export const SCENARIOS: Scenario[] = [
     id: "1950",
     year: 1950,
     name: "The Early Cold War",
-    tagline: "Europe is split, Germany exists twice, and the money is on a barrow.",
+    tagline: "Germany exists twice, China has just gone red, and the Soviets have the bomb.",
     description:
-      "Britain is broke and rationing ends this year. The Marshall Plan is about to be announced, the NATO treaty is signed, and the Korean peninsula has become a shooting gallery. Every economy here is either rebuilding or mobilising, and the strange feature of the era is that peace and preparation cost almost the same.",
+      "New Year's Day 1950. NATO is nine months old, Marshall Plan money is rebuilding Western Europe, Mao has just taken China, and the Soviet Union tested its first bomb in August. Britain still rations food and still rules much of Africa. Korea will explode in June, and the great post-war boom is about to begin.",
     epoch: 0,
     startDate: { year: 1950, month: 1, day: 1 },
-    daysPerSecond: 0.08,
+    daysPerSecond: 1,
     theme: {
       tokens: {
         "--bg": "#e6e8e4",
@@ -208,7 +208,7 @@ export const SCENARIOS: Scenario[] = [
     },
     params: g({ seed: 19500101, growthSmoothing: 0.09, marketVolatility: 1.3, crashProbability: 0.0018, debtInterestBase: 0.035, inflationTarget: 0.015, corporateWeight: 0.3, eventRate: 1.3, fiscalMultiplier: 1.6, corruptionRate: 0.0002 }),
     overrides: { global: { commodityPrices: { gold: 35, oil: 2.9, wheat: 1.2, copper: 4.1, coal: 3.4 }, riskAppetite: 41 } },
-    tags: ["reconstruction", "bipolar", "marshall-plan", "nato"],
+    tags: ["cold-war", "reconstruction", "decolonisation", "nato"],
   },
 
   // ============================================================== 1990 =====
@@ -216,12 +216,12 @@ export const SCENARIOS: Scenario[] = [
     id: "1990",
     year: 1990,
     name: "The Unipolar Moment",
-    tagline: "There is one superpower left and it knows exactly what that means.",
+    tagline: "Saddam has taken Kuwait. Germany reunifies next month. The Soviet Union is coming apart.",
     description:
-      "Berlin is about to come down and the Soviet Union has five years left on the clock. The American consumer boom is unstoppable, Japan is about to buy the price of Paris, and the European Community is a customs union that has not yet discovered the single currency. There is no precedent for what happens next, which is generally how it starts.",
+      "2 September 1990. Iraq occupied Kuwait a month ago and a US-led coalition is massing in Saudi Arabia. Germany reunifies on 3 October. The Soviet Union still exists but its republics are declaring sovereignty one by one. Japan's bubble has just burst, and inflation is high across the West.",
     epoch: 0,
     startDate: { year: 1990, month: 9, day: 2 },
-    daysPerSecond: 0.09,
+    daysPerSecond: 1,
     theme: {
       tokens: {
         "--bg": "#0b1220",
@@ -247,7 +247,7 @@ export const SCENARIOS: Scenario[] = [
     },
     params: g({ seed: 19900902, growthSmoothing: 0.1, marketVolatility: 1.1, crashProbability: 0.0012, debtInterestBase: 0.065, inflationTarget: 0.03, eventRate: 1.1, corporateWeight: 0.6, tradeElasticity: 1.9 }),
     overrides: { global: { commodityPrices: { gold: 380, oil: 24, wheat: 4.6, copper: 2.7 }, riskAppetite: 66 } },
-    tags: ["unipolar", "deregulation", "globalisation", "yugoslavia"],
+    tags: ["end-of-cold-war", "gulf-crisis", "reunification", "globalisation"],
   },
 
   // ============================================================== 2010 =====
@@ -255,12 +255,12 @@ export const SCENARIOS: Scenario[] = [
     id: "2010",
     year: 2010,
     name: "After the Crash",
-    tagline: "The banks are still being bailed out. The voters have noticed.",
+    tagline: "The banks have been bailed out. Now the markets are looking at the governments.",
     description:
-      "Eight years after Lehman, sovereign spreads are the new thing everyone watches, the euro crisis has made the single currency a liability as well as a project, and a generation of twenty-somethings has decided that the system is not for them. Governments everywhere are running out of money faster than they can spend it, which is exactly when the populists start winning.",
+      "New Year's Day 2010, fifteen months after Lehman Brothers. Unemployment is near 10% across the West, rates are at the floor, and China is leading the recovery with a giant stimulus. Greece has just admitted its deficit is far larger than reported, and the euro zone has no plan for what happens next.",
     epoch: 0,
     startDate: { year: 2010, month: 1, day: 1 },
-    daysPerSecond: 0.1,
+    daysPerSecond: 1,
     theme: {
       tokens: {
         "--bg": "#f7f8fa",
@@ -286,7 +286,7 @@ export const SCENARIOS: Scenario[] = [
     },
     params: g({ seed: 20100101, growthSmoothing: 0.11, marketVolatility: 1.25, crashProbability: 0.0026, debtInterestBase: 0.028, inflationTarget: 0.02, eventRate: 1.2, corruptionDrag: 0.26 }),
     overrides: { global: { commodityPrices: { gold: 1420, oil: 79, wheat: 12, copper: 83 }, riskAppetite: 44 } },
-    tags: ["sovereign-debt", "eurozone", "occupy", "social-media"],
+    tags: ["great-recession", "euro-crisis", "sovereign-debt", "china-rising"],
   },
 
   // ============================================================== 2020 =====
@@ -296,10 +296,10 @@ export const SCENARIOS: Scenario[] = [
     name: "The Pandemic",
     tagline: "Every projection says the same thing. None of them are believed.",
     description:
-      "Global GDP is on track for the worst fall since the 1930s, central banks have cut to the floor, and fiscal deficits everywhere are larger than they were in the 1940s. Supply chains have snapped, unemployment claims are measured in tens of millions, and every government in the world is trying to buy the same semiconductors.",
+      "11 March 2020. The WHO has just declared a pandemic. Markets are in free fall, travel is stopping, and within weeks a third of humanity will be locked down. Global GDP is heading for its worst fall since the 1930s. Central banks and treasuries are about to respond on a wartime scale.",
     epoch: 0,
     startDate: { year: 2020, month: 3, day: 11 },
-    daysPerSecond: 0.1,
+    daysPerSecond: 1,
     theme: {
       tokens: {
         "--bg": "#071018",
@@ -323,7 +323,7 @@ export const SCENARIOS: Scenario[] = [
       texture: "scan",
       masthead: "CROWN CRISIS DESK",
     },
-    params: g({ seed: 20200311, growthSmoothing: 0.04, growthBias: -0.55, marketVolatility: 3.2, crashProbability: 0.009, debtInterestBase: 0.008, inflationTarget: 0.005, fiscalMultiplier: 2.1, eventRate: 2.6, crisisProbability: 0.008, corporateWeight: 0.55 }),
+    params: g({ seed: 20200311, growthSmoothing: 0.04, marketVolatility: 3.2, crashProbability: 0.0012, debtInterestBase: 0.008, inflationTarget: 0.005, fiscalMultiplier: 2.1, eventRate: 1.2, crisisProbability: 0.003, corporateWeight: 0.55 }),
     overrides: { global: { commodityPrices: { gold: 1900, oil: 24, wheat: 8, copper: 62 }, riskAppetite: 12 } },
     tags: ["covid", "lockdown", "unprecedented-stimulus", "supply-shock"],
   },
@@ -335,10 +335,10 @@ export const SCENARIOS: Scenario[] = [
     name: "Present Day",
     tagline: "Trade blocs, sovereign debt, and a war nobody wants to fund.",
     description:
-      "The world as it actually is: a US-China technology boundary that has hardened into an export-control wall, European defence budgets doubling on a security argument, fiscal space exhausted almost everywhere, and a stock market priced for perfection. You start from here. Nothing after this point is written down.",
+      "New Year's Day 2026. Tariffs are back, the war in Ukraine grinds on, US-China technology rivalry has hardened, European defence budgets are climbing, debt is high almost everywhere, and an AI boom is carrying the stock market. You start from here. Nothing after this point is written down.",
     epoch: 0,
     startDate: { year: 2026, month: 1, day: 1 },
-    daysPerSecond: 0.12,
+    daysPerSecond: 1,
     theme: {
       tokens: {
         "--bg": "#09090b",
@@ -363,7 +363,7 @@ export const SCENARIOS: Scenario[] = [
       masthead: "CROWN",
     },
     params: g({ seed: 20260101 }),
-    overrides: { global: { commodityPrices: { gold: 2450, oil: 78, wheat: 240, copper: 9500 }, riskAppetite: 58 } },
+    overrides: { global: { commodityPrices: { gold: 4300, oil: 62, wheat: 210, copper: 11000, silver: 70 }, riskAppetite: 58 } },
     tags: ["great-power", "sanctions", "ai", "debt"],
   },
 ];

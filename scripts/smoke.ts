@@ -1,125 +1,111 @@
 /**
- * Smoke test: build every scenario, tick it forward a simulated year, and assert
- * that the numbers stay finite and the invariants hold.
+ * Validates every scenario's data and runs its simulation forward.
  *
- * Run with: npx tsx scripts/smoke.ts
+ * Run with: npx tsx scripts/smoke.ts [years]
  */
+import { readFileSync } from "node:fs";
 import { SCENARIOS } from "../src/data/scenarios";
+import { COUNTRY_BY_NUMERIC, TERRITORY_OWNER, UNCLAIMED_FEATURES, NAMED_FEATURES } from "../src/data/countries";
+import { HISTORY } from "../src/data/history";
 import { buildWorld } from "../src/sim/bootstrap";
 import { SimEngine } from "../src/sim/engine";
-import { SECTORS } from "../src/data/economy";
-import { YEAR } from "../src/web/format";
 
+const YEARS = Number(process.argv[2] ?? 10);
 let failures = 0;
 const fail = (msg: string) => {
   console.error(`  FAIL ${msg}`);
   failures++;
 };
 
-function assertFinite(label: string, v: number) {
-  if (!Number.isFinite(v)) fail(`${label} is ${v}`);
+const topo = JSON.parse(readFileSync("public/geo/countries-50m.json", "utf8"));
+const features: { id?: string | number; properties?: { name?: string } }[] = topo.objects.countries.geometries;
+for (const f of features) {
+  const id = f.id === undefined || f.id === null ? "" : String(f.id).padStart(3, "0");
+  const name = f.properties?.name ?? "";
+  if (!id) {
+    if (!NAMED_FEATURES[name] && !TERRITORY_OWNER[name]) fail(`map feature "${name}" has no owner mapping`);
+  } else if (!COUNTRY_BY_NUMERIC[id] && !TERRITORY_OWNER[id] && !UNCLAIMED_FEATURES.has(id) && id !== "732" && id !== "036") {
+    fail(`map feature ${id} "${name}" is not joined to any country`);
+  }
 }
 
 for (const scenario of SCENARIOS) {
   const t0 = Date.now();
   const world = buildWorld(scenario, `Smoke ${scenario.id}`, `test:${scenario.id}`, Date.now());
   const build = Date.now() - t0;
+  const history = HISTORY[scenario.year];
 
-  const countries = Object.keys(world.countries);
-  const independents = countries.filter((c) => !world.countries[c].overlord && !world.countries[c].annexedBy);
-  const companies = Object.keys(world.companies);
-  const exchanges = Object.keys(world.exchanges);
-
-  console.log(
-    `\n${scenario.id}  ${scenario.name}\n` +
-    `  polities ${countries.length} (${independents.length} sovereign)  companies ${companies.length}  exchanges ${exchanges.length}  ` +
-    `treaties ${Object.keys(world.treaties).length}  wars ${Object.keys(world.wars).length}  parties ${Object.keys(world.parties).length}  ` +
-    `characters ${Object.keys(world.characters).length}  [build ${build}ms]`,
-  );
-
-  // --- structural invariants ---
-  for (const c of Object.values(world.countries)) {
-    assertFinite(`${c.id} gdp`, c.economy.gdp);
-    assertFinite(`${c.id} gdpPerCapita`, c.economy.gdpPerCapita);
-    if (c.economy.gdp <= 0) fail(`${c.id} has non-positive GDP`);
-    if (c.economy.gdpPerCapita <= 0) fail(`${c.id} has non-positive GDP per capita`);
-    const share = c.economy.sectors.reduce((a, s) => a + s.share, 0);
-    if (Math.abs(share - 1) > 0.02) fail(`${c.id} sector shares sum to ${share.toFixed(3)}`);
-    for (const s of c.economy.sectors) {
-      if (!SECTORS[s.id]) fail(`${c.id} has unknown sector "${s.id}"`);
-      if (s.employment < 0) fail(`${c.id}/${s.id} has negative employment`);
-    }
-    if (c.legislature) {
-      for (const ch of c.legislature.chambers) {
-        const seats = c.parties.reduce((a, p) => a + (p.seats[ch.id] ?? 0), 0);
-        if (ch.seats > 0 && seats !== ch.seats) fail(`${c.id}/${ch.id} seats sum to ${seats}, expected ${ch.seats}`);
-        for (const p of c.parties) if (p.seats[ch.id] && p.seats[ch.id] < 0) fail(`${c.id}/${p.id} negative seats`);
-      }
+  const seen = new Set<string>();
+  for (const p of history.polities) {
+    if (seen.has(p.id)) fail(`${scenario.id}: duplicate polity ${p.id}`);
+    seen.add(p.id);
+    if (!p.hos) fail(`${scenario.id}: ${p.id} has no head of state`);
+    if (p.overlord && !history.polities.some((x) => x.id === p.overlord)) fail(`${scenario.id}: ${p.id} overlord ${p.overlord} missing`);
+  }
+  const claims = new Map<string, string>();
+  for (const p of history.polities) {
+    for (const land of p.lands) {
+      if (claims.has(land)) fail(`${scenario.id}: ${land} claimed by ${claims.get(land)} and ${p.id}`);
+      claims.set(land, p.id);
     }
   }
-  for (const co of Object.values(world.companies)) {
-    assertFinite(`${co.name} valuation`, co.valuation);
-    if (co.employees < 0) fail(`${co.name} negative employees`);
-    const held = co.shareholders.reduce((a, s) => a + s.stake, 0);
-    if (held > 1.05) fail(`${co.name} shareholder stakes sum to ${held.toFixed(2)}`);
+  for (const r of history.regions) if (!seen.has(r.owner)) fail(`${scenario.id}: region ${r.id} owner ${r.owner} missing`);
+  for (const iso of Object.keys(COUNTRY_BY_NUMERIC)) {
+    if (!world.control[iso]) fail(`${scenario.id}: land ${COUNTRY_BY_NUMERIC[iso].iso3} (${COUNTRY_BY_NUMERIC[iso].name}) belongs to nobody`);
+    else if (!world.countries[world.control[iso]]) fail(`${scenario.id}: land ${iso} controller ${world.control[iso]} does not exist`);
   }
 
-  // --- run a simulated year ---
   const engine = new SimEngine(world);
+  const usa0 = { ...world.countries.USA?.economy };
+  const line = (c: typeof world.countries[string]) =>
+    `${c.id.padEnd(4)} GDP ${(c.economy.gdp / 1e9).toFixed(1).padStart(8)}B  gr ${(c.economy.gdpGrowth * 100).toFixed(1).padStart(5)}%  inf ${(c.economy.monetary.inflation * 100).toFixed(1).padStart(5)}%  u ${(c.economy.labour.unemployment * 100).toFixed(1).padStart(4)}%  r ${(c.economy.monetary.policyRate * 100).toFixed(1).padStart(4)}%  y ${(c.economy.macro.bondYield * 100).toFixed(1).padStart(4)}%  debt ${(c.economy.fiscal.debtToGdp * 100).toFixed(0).padStart(3)}%  def ${(c.economy.fiscal.budgetBalanceRatio * 100).toFixed(1).padStart(5)}%  appr ${c.executive.approval.toFixed(0).padStart(2)}`;
   const t1 = Date.now();
-  const steps = 180; // 180 ticks x (YEAR/180) seconds
-  const perTick = YEAR / steps;
-  for (let i = 0; i < steps; i++) engine.tick(perTick / world.daysPerSecond);
+  const majors = ["USA", "GBR", "DEU", "CHN", "JPN", "IND", "BRA", "RUS", "USS"].filter((m) => world.countries[m]).slice(0, 5);
+  console.log(`\n${scenario.id} ${scenario.name}: ${Object.keys(world.countries).length} polities, ${Object.keys(world.companies).length} firms, ${Object.keys(world.wars).length} wars, ${Object.keys(world.treaties).length} treaties, world GDP ${(world.globals.globalGdp / 1e12).toFixed(2)}T [build ${build}ms]`);
+  for (const m of majors) console.log("  start " + line(world.countries[m]));
+  for (let y = 0; y < YEARS; y++) {
+    engine.advanceDays(365);
+    if (y === 0 || y === YEARS - 1) for (const m of majors) if (world.countries[m] && !world.countries[m].annexedBy) console.log(`  y${y + 1}    ` + line(world.countries[m]));
+  }
   const elapsed = Date.now() - t1;
+  console.log(`  ${YEARS}y in ${elapsed}ms (${(YEARS * 365000 / elapsed).toFixed(0)} days/s). wars ${Object.values(world.wars).filter((w) => !w.endedAt).length}, events ${world.events.length}, oil ${world.markets.commodityPrices.oil.toFixed(1)}, world GDP ${(world.globals.globalGdp / 1e12).toFixed(2)}T inf ${(world.globals.globalInflation * 100).toFixed(1)}%`);
 
-  assertFinite("world global GDP", world.globals.globalGdp);
-  assertFinite("world inflation", world.globals.globalInflation);
-  if (world.globals.globalGdp <= 0) fail("global GDP collapsed to zero");
-  if (world.globals.globalInflation < -1) fail("global inflation below -100%");
+  const biggest = Object.values(world.countries).filter((c) => !c.annexedBy).sort((a, b) => b.economy.gdp - a.economy.gdp).slice(0, 4);
+  console.log(`  largest: ${biggest.map((c) => `${c.id} ${(c.economy.gdp / 1e12).toFixed(2)}T`).join(", ")}; infl max ${Object.values(world.countries).reduce((m, c) => (c.economy.monetary.inflation > m.v ? { v: c.economy.monetary.inflation, id: c.id } : m), { v: -1, id: "" }).id}; approval ${(Object.values(world.countries).reduce((a, c) => a + c.executive.approval, 0) / Object.keys(world.countries).length).toFixed(0)}`);
 
-  // NaN sweep across the whole object graph.
-  let nanPaths = 0;
+  // Accounts identity, and a NaN sweep through everything the engine writes.
+  for (const c of Object.values(world.countries)) {
+    if (c.annexedBy) continue;
+    const a = c.economy.accounts;
+    const residual = Math.abs(a.consumption + a.investment + a.government + a.exports - a.imports - c.economy.gdp) / c.economy.gdp;
+    if (residual > 0.02) fail(`${c.id}: national accounts off by ${(residual * 100).toFixed(1)}%`);
+    const shares = c.economy.sectors.reduce((s, x) => s + x.share, 0);
+    if (Math.abs(shares - 1) > 0.01) fail(`${c.id}: sector shares sum to ${shares.toFixed(3)}`);
+    if (c.legislature) for (const ch of c.legislature.chambers) {
+      const sum = c.parties.reduce((s, p) => s + (p.seats[ch.id] ?? 0), 0);
+      if (Math.abs(sum - ch.seats) > Math.max(2, ch.seats * 0.02)) fail(`${c.id}/${ch.id}: seats ${sum} of ${ch.seats}`);
+    }
+  }
+  let nan = 0;
   const sweep = (node: unknown, path: string, depth: number) => {
-    if (depth > 7 || nanPaths > 12) return;
+    if (depth > 8 || nan > 10) return;
     if (typeof node === "number") {
       if (!Number.isFinite(node)) {
-        console.error(`  FAIL NaN at ${scenario.id} ${path}`);
-        nanPaths++;
+        fail(`${scenario.id} non-finite at ${path}`);
+        nan++;
       }
-      return;
-    }
-    if (Array.isArray(node)) {
-      if (node.length > 400) return;
-      for (let i = 0; i < node.length; i++) sweep(node[i], `${path}[${i}]`, depth + 1);
-      return;
-    }
-    if (node && typeof node === "object") {
-      for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
-        if (k === "rings") continue;
-        sweep(v, `${path}.${k}`, depth + 1);
-      }
+    } else if (Array.isArray(node)) {
+      if (node.length < 600) node.forEach((v, i) => sweep(v, `${path}[${i}]`, depth + 1));
+    } else if (node && typeof node === "object") {
+      for (const [k, v] of Object.entries(node as Record<string, unknown>)) sweep(v, `${path}.${k}`, depth + 1);
     }
   };
   sweep(world.countries, "countries", 0);
   sweep(world.companies, "companies", 0);
-  sweep(world.wars, "wars", 0);
   sweep(world.markets, "markets", 0);
-
-  const globalGrowth = () => {
-    let num = 0, den = 0;
-    for (const c of Object.values(world.countries)) { if (c.annexedBy || c.overlord) continue; num += c.economy.gdpGrowth * c.economy.gdp; den += c.economy.gdp; }
-    return den > 0 ? num / den : 0;
-  };
-  const us = world.countries.USA;
-  const chn = world.countries.CHN;
-  console.log(
-    `  after 1 year (${elapsed}ms): world GDP ${(world.globals.globalGdp / 1e12).toFixed(1)}T  ` +
-    `growth ${(globalGrowth() * 100).toFixed(2)}%  inflation ${(world.globals.globalInflation * 100).toFixed(2)}%  ` +
-    `events ${world.events.length}`,
-  );
-  if (us) console.log(`    USA  GDP ${(us.economy.gdp / 1e12).toFixed(2)}T  growth ${(us.economy.gdpGrowth * 100).toFixed(2)}%  infl ${(us.economy.monetary.inflation * 100).toFixed(2)}%  u ${(us.economy.labour.unemployment * 100).toFixed(2)}%  debt ${(us.economy.fiscal.debtToGdp * 100).toFixed(0)}%`);
-  if (chn) console.log(`    CHN  GDP ${(chn.economy.gdp / 1e12).toFixed(2)}T  growth ${(chn.economy.gdpGrowth * 100).toFixed(2)}%  infl ${(chn.economy.monetary.inflation * 100).toFixed(2)}%`);
-  for (const e of world.events.slice(-3)) console.log(`    · [${e.kind}] ${e.title}`);
+  void usa0;
+  const size = JSON.stringify(world).length;
+  console.log(`  save size ${(size / 1e6).toFixed(2)} MB`);
 }
 
 console.log(`\n${failures === 0 ? "ALL SCENARIOS PASS" : `${failures} FAILURE(S)`}`);

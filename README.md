@@ -1,5 +1,9 @@
 # CROWN: brief
 
+> **Status: singleplayer only.** Multiplayer is switched off for now. The whole game runs in the browser in a Web Worker (`src/web/sim.worker.ts`), with saves kept in the browser's IndexedDB; the server only handles accounts. `/api/worlds*` answers 503 so no Durable Objects start.
+>
+> Scenario data lives in `src/data/history`: one table per start date (who holds which land, who leads it), plus overlays for borders the modern map lacks. The economy is in `src/sim/step-economy.ts`. `npx tsx scripts/smoke.ts` validates all eight scenarios and runs them forward.
+
 **What it is:** A persistent, real-time world political and economic simulation where every country is playable and every office is contestable.
 **For:** Players who want to build a political career from citizen to head of government, and developers who want to run and tune a living world.
 **Success:** A new player signs in with Google or email, founds a politician, wins a seat, and sees the economy, map and world wire react to their choices in real time.
