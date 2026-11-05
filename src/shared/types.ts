@@ -931,6 +931,8 @@ export interface Front {
   axis?: [number, number, number, number];
   /** Polity whose land is fought over, when it is not simply the loser's. "none" draws no occupation. */
   theatre?: string;
+  /** No land border: the attacker has to cross the sea, and its navy decides how well. */
+  overseas?: boolean;
   /** Last occupation milestone announced, in 5% steps. */
   lastBucket?: number;
   id: EntityId;

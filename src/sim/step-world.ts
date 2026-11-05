@@ -1,6 +1,7 @@
 import type { Country, Sanction, Treaty, War, World } from "../shared/types";
 import { pushEvent } from "./bootstrap";
 import { frontOccupation } from "./occupation";
+import { LAND_BORDERS } from "../data/borders";
 import { Rng, approach, clamp, clamp01 } from "./rng";
 import { SECONDS_PER_YEAR } from "./step-economy";
 
@@ -162,7 +163,12 @@ export function stepWars(world: World, rnd: Rng, dt: number): void {
         mountain: 2.1, urban: 1.5, "urban-core": 1.4, forest: 1.3, coastal: 1.05, plains: 0.85, desert: 0.95,
       };
       const mult = terrainDefence[front.terrain] ?? 1;
-      const ratio = attacker / Math.max(1, defender * mult);
+      let ratio = attacker / Math.max(1, defender * mult);
+      if (front.overseas) {
+        // Whoever rules the sea decides how many troops land and stay supplied.
+        const seaControl = navalPower(world.countries[front.belligerents[0]]) / navalPower(world.countries[front.belligerents[1]]);
+        ratio *= clamp(Math.pow(seaControl, 0.5), 0.25, 3);
+      }
 
       // Attrition. Only the troops that can reach each other fight, so a huge army does not
       // lose men in proportion to its size, and the weaker side takes the worse of it.
@@ -207,7 +213,8 @@ export function stepWars(world: World, rnd: Rng, dt: number): void {
       const breakthrough = Math.sign(edge) * (Math.abs(edge) + Math.max(0, Math.abs(edge) - 1) ** 2);
       const pace = clamp(breakthrough, -8, 8) * orders * (dt / (SECONDS_PER_YEAR * 20));
       const wobble = rnd.normal() * 0.05 * Math.sqrt(dt / 86400);
-      front.control = clamp(front.control + pace * 100 + wobble, -100, 100);
+      // An invasion that fails is thrown back into the sea; the defender does not cross it in return.
+      front.control = clamp(front.control + pace * 100 + wobble, front.overseas ? 0 : -100, 100);
       announceFront(world, war, front);
 
       const owner = world.countries[front.belligerents[1]];
@@ -265,6 +272,24 @@ function nextPhase(war: War, exhaustion: number, decided: number): War["phase"] 
   return "war";
 }
 
+/** Whether two states touch by land anywhere. Annexed regions count through their host territories. */
+export function shareLandBorder(world: World, a: string, b: string): boolean {
+  const landsOf = (id: string) => [...(world.countries[id]?.lands ?? []), ...world.regions.filter((r) => r.owner === id).flatMap((r) => r.hosts)];
+  const theirs = new Set(landsOf(b));
+  for (const land of landsOf(a)) {
+    if (theirs.has(land)) return true;
+    for (const n of LAND_BORDERS[land] ?? []) if (theirs.has(n)) return true;
+  }
+  return false;
+}
+
+/** Naval strength: ships and sailors, and how good they are. */
+function navalPower(c: Country | undefined): number {
+  const n = c?.military.branches.navy;
+  if (!n) return 100;
+  return Math.max(100, n.active * (n.quality / 100) * (Math.max(15, c.military.readiness) / 100));
+}
+
 /** Hand over part of a country: the ground on the map, its people and its output. */
 export function transferLand(world: World, from: string, to: string, share: number, ring: [number, number][], name: string): void {
   const a = world.countries[from];
@@ -318,8 +343,10 @@ export function joinWar(world: World, warId: string, joiner: string, side: strin
     return o ? Math.hypot((c.lat ?? 0) - (o.lat ?? 0), (c.lon ?? 0) - (o.lon ?? 0)) : Infinity;
   };
   const nearest = [...opposed].sort((a, b) => distanceTo(a) - distanceTo(b))[0];
-  if (nearest && distanceTo(nearest) <= 30) {
-    war.fronts.push({ id: `${warId}-f${war.fronts.length}`, name: `${c.name} Front`, belligerents: [joiner, nearest], control: 0, contestedOutput: 0, openedAt: world.t, terrain: "plains", attritionRate: 0.0004 });
+  const bordering = opposed.find((o) => shareLandBorder(world, joiner, o));
+  if (bordering || (nearest && distanceTo(nearest) <= 30)) {
+    const foe = bordering ?? nearest;
+    war.fronts.push({ id: `${warId}-f${war.fronts.length}`, name: `${c.name} Front`, belligerents: [joiner, foe], control: 0, contestedOutput: 0, openedAt: world.t, terrain: bordering ? "plains" : "coastal", attritionRate: 0.0004, overseas: !bordering });
   } else if (war.belligerents[side] && !war.belligerents[side].includes(joiner)) {
     war.belligerents[side].push(joiner);
   }
@@ -337,6 +364,7 @@ export function declareWar(world: World, attacker: string, defender: string, cau
   if (a.wars.some((id) => world.wars[id]?.belligerents[defender])) return null;
 
   const id = `war-${Object.keys(world.wars).length}-${Math.round(world.t)}`;
+  const overseasInvasion = !shareLandBorder(world, attacker, defender);
   const war: War = {
     id,
     name: `${a.name} - ${d.name} War`,
@@ -344,7 +372,9 @@ export function declareWar(world: World, attacker: string, defender: string, cau
     phase: "mobilised",
     belligerents: { [attacker]: [] as string[], [defender]: [] as string[] },
     cause,
-    fronts: [{ id: `${id}-f0`, name: `${a.name} - ${d.name} Front`, belligerents: [attacker, defender], control: 0, contestedOutput: 0, openedAt: world.t, terrain: "plains", attritionRate: 0.0004 }],
+    fronts: [overseasInvasion
+      ? { id: `${id}-f0`, name: `${a.name} landings in ${d.name}`, belligerents: [attacker, defender], control: navalPower(a) >= navalPower(d) * 0.5 ? 1 : 0, contestedOutput: 0, openedAt: world.t, terrain: "coastal", attritionRate: 0.0004, overseas: true }
+      : { id: `${id}-f0`, name: `${a.name} - ${d.name} Front`, belligerents: [attacker, defender], control: 0, contestedOutput: 0, openedAt: world.t, terrain: "plains", attritionRate: 0.0004 }],
     exhaustion: { [attacker]: 4, [defender]: 4 },
     casualties: {},
     materiel: {},
