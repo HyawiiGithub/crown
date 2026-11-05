@@ -448,3 +448,7 @@ html, body { position: fixed; inset: 0; width: 100%; overflow: hidden; }
 @media (max-width: 1250px) { .masthead__stats { display: none; } }
 @media (max-width: 1000px) { .masthead__title { display: none; } }
 .table td .btn--sm { padding: 2px 5px; }
+.spark { min-width: 0; overflow: hidden; }
+.spark figcaption { align-items: flex-start; flex-wrap: nowrap; }
+.spark figcaption .stat__label { min-width: 0; line-height: 1.2; }
+.spark figcaption .mono { flex: none; }

@@ -36,6 +36,8 @@ export class SimEngine {
     this.rng = new Rng(world.seed);
     if (rngState !== undefined) this.rng.state = rngState;
     if (world.dayCount === undefined) world.dayCount = Math.floor(world.t / DAY);
+    // Charts start from the opening position, not a month in.
+    if (world.t === 0 && Object.values(world.countries).every((c) => !c.economy.history.length)) recordHistory(world);
   }
 
   get rngState(): number {
@@ -100,6 +102,16 @@ function recordHistory(w: World): void {
       unemployment: e.labour.unemployment,
       debtToGdp: e.fiscal.debtToGdp,
       stockIndex: ex?.index ?? 0,
+      gdpPerCapita: e.gdpPerCapita,
+      population: e.population,
+      policyRate: e.monetary.policyRate,
+      bondYield: e.macro.bondYield,
+      budgetBalance: e.fiscal.budgetBalanceRatio,
+      tradeBalance: e.trade.tradeBalance / Math.max(1, e.gdp),
+      exchangeRate: e.monetary.exchangeRateVsUsd,
+      medianWage: e.labour.medianWage,
+      approval: c.executive.approval,
+      militarySpend: e.fiscal.military,
     });
     if (e.history.length > 480) e.history.splice(0, e.history.length - 480);
   }
