@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { User, WorldDirective } from "../shared/types";
 import { WorldMap, type MapLayer } from "./components/Map";
-import { CountryPanel, MarketPanel, RankingPanel, WarPanel } from "./components/panels";
+import { CountryPanel, MarketPanel, PeaceDeal, RankingPanel, WarPanel } from "./components/panels";
 import { DevMenu } from "./components/DevMenu";
 import { TickerList, Lobby } from "./components/Lobby";
 import { applyTheme, themeFromScenario, type Theme } from "./theme";
@@ -265,7 +265,7 @@ function WorldShell() {
   };
 
   return (
-    <div className="app" data-view={mobileView}>
+    <div className="app" data-view={mobileView} data-drawing={s.peaceDrawing ? "true" : undefined}>
       <header className="masthead">
         <span className="masthead__title">{scenario?.theme.masthead ?? "CROWN"}</span>
         <span className="masthead__date mono">{scenario ? simDate(scenario.startDate, s.simTime) : ""}</span>
@@ -341,6 +341,8 @@ function WorldShell() {
           {s.rightTab === "markets" && <MarketPanel markets={s.markets} companies={s.companies} />}
         </div>
       </aside>
+
+      <PeaceDeal />
 
       <nav className="mobile-nav" aria-label="Game views">
         {([["map", "Map"], ["news", "News"], ["country", "Country"]] as const).map(([id, label]) => (

@@ -10,6 +10,7 @@ import { SimEngine } from "../src/sim/engine";
 import { runCommand } from "../src/sim/commands";
 import { runDevOp } from "../src/sim/dev-ops";
 import { Rng } from "../src/sim/rng";
+import { frontOccupation } from "../src/sim/occupation";
 
 let failures = 0;
 const check = (name: string, ok: boolean, detail = "") => {
@@ -142,6 +143,33 @@ const pc = (v: number) => `${(v * 100).toFixed(1)}%`;
   check("nationalisation costs compensation", r.ok && g.c.economy.fiscal.debt > debtBefore, r.message);
   check("nationalised firm leaves the exchange", !apple.listed);
   check("other countries' firms are out of reach", !g.cmd({ type: "nationalise", company: "co-toyota" }).ok);
+}
+
+// Peace deals move land, people and money.
+{
+  const g = game("2026", "RUS");
+  const ua = g.world.countries.UKR;
+  const ring: [number, number][] = [[36, 50], [41, 50], [41, 45], [33, 45]];
+  const war = Object.values(g.world.wars).find((w) => w.belligerents.UKR)!;
+  const greedy = g.cmd({ type: "propose-peace", war: war.id, enemy: "UKR", annexOccupied: true, occupiedRing: ring, reparations: 0.3 });
+  check("greedy terms are refused", !greedy.ok, greedy.message);
+  const gdp = ua.economy.gdp;
+  const rusGdp = g.c.economy.gdp;
+  const regions = g.world.regions.length;
+  const deal = g.cmd({ type: "propose-peace", war: war.id, enemy: "UKR", annexOccupied: true, occupiedRing: ring });
+  check("annexing what you hold is accepted", deal.ok, deal.message);
+  check("the land changes hands on the map", g.world.regions.length === regions + 1 && g.world.regions[regions].owner === "RUS");
+  check("the loser shrinks and the winner grows", ua.economy.gdp < gdp * 0.85 && g.c.economy.gdp > rusGdp, `${(ua.economy.gdp / 1e9).toFixed(0)}B`);
+  check("the war ends for both", Boolean(war.endedAt) && !ua.wars.includes(war.id) && !g.c.wars.includes(war.id));
+  check("no occupation line is left behind", frontOccupation(war, war.fronts[0], g.world.countries) === null);
+  g.engine.advanceDays(120);
+  check("the economy runs on after a transfer", Number.isFinite(ua.economy.gdp) && ua.economy.gdp > 0);
+
+  const u = game("2026", "UKR");
+  const w2 = Object.values(u.world.wars).find((w) => w.belligerents.RUS)!;
+  check("the side losing ground cannot just walk away", !u.cmd({ type: "propose-peace", war: w2.id, enemy: "RUS" }).ok);
+  const ceded = u.cmd({ type: "propose-peace", war: w2.id, enemy: "RUS", cede: true, cededRing: ring, reparations: -0.05 });
+  check("giving up land and paying buys peace", ceded.ok, ceded.message);
 }
 
 // A saved game continues identically.

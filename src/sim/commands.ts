@@ -4,7 +4,8 @@ import { SimEngine, setSpeed } from "./engine";
 import { stabilisationPlan } from "./step-economy";
 import { clamp, clamp01, type Rng } from "./rng";
 import { applyPolicy, introduceBill, needsLegislature } from "./step-politics";
-import { declareWar, imposeSanction, liftSanction, signTreaty } from "./step-world";
+import { annex, declareWar, imposeSanction, liftSanction, signTreaty, transferLand } from "./step-world";
+import { frontOccupation, peaceAccepted, peaceCost, peaceStanding, type PeaceTerms } from "./occupation";
 
 /**
  * Everything the player can do. The sim is the single authority: the UI only
@@ -208,6 +209,91 @@ export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Reco
       war.stance = { ...war.stance, [c.id]: stance };
       return { ok: true, message: stance === "offensive" ? "Offensive ordered. Casualties will rise." : stance === "defensive" ? "Your forces dig in." : "Normal operations." };
     }
+    case "propose-peace": {
+      const war = world.wars[String(body.war)];
+      const enemy = String(body.enemy ?? "");
+      if (!war || war.endedAt || !war.belligerents[c.id]) return { ok: false, message: "You are not fighting that war." };
+      if (!war.belligerents[enemy] || enemy === c.id) return { ok: false, message: "That side is not in this war." };
+      const foe = world.countries[enemy];
+      const standing = peaceStanding(war, c.id, enemy, world.countries);
+      const drawn = body.drawn as { ring: [number, number][]; share: number } | undefined;
+      const terms: PeaceTerms = {
+        annexOccupied: Boolean(body.annexOccupied) && standing.mine > 0,
+        annexWhole: Boolean(body.annexWhole) && standing.mine >= 0.8,
+        cede: Boolean(body.cede) && standing.theirs > 0,
+        drawnShare: drawn ? clamp(Number(drawn.share), 0, 1) : 0,
+        reparations: clamp(Number(body.reparations ?? 0), -0.3, 0.3),
+      };
+      if (Boolean(body.annexWhole) && !terms.annexWhole) return { ok: false, message: "You need to hold at least 80% of a country to annex all of it." };
+      if (!peaceAccepted(terms, standing)) {
+        return { ok: false, message: `${foe?.name ?? war.rebels?.[enemy]?.name ?? "The enemy"} refuses. These terms ask for ${peaceCost(terms, standing).toFixed(0)} and your position only supports ${standing.leverage.toFixed(0)}.` };
+      }
+
+      const results: string[] = [];
+      if (foe && terms.annexWhole) {
+        annex(world, c.id, enemy, `${foe.name} is annexed under the peace terms.`);
+        results.push(`${foe.name} is annexed`);
+      } else if (foe) {
+        const front = standing.mineFront >= 0 ? war.fronts[standing.mineFront] : undefined;
+        const held = front ? frontOccupation(war, front, world.countries) : null;
+        const ring = body.occupiedRing as [number, number][] | undefined;
+        if (terms.annexOccupied && held && ring && ring.length >= 3) {
+          transferLand(world, held.territory, c.id, held.share, ring, `Annexed from ${world.countries[held.territory]?.name ?? held.territory}`);
+          results.push(`you annex ${(held.share * 100).toFixed(1)}% of ${world.countries[held.territory]?.name}`);
+        }
+        if (drawn && terms.drawnShare) {
+          transferLand(world, enemy, c.id, terms.drawnShare, drawn.ring, `Annexed from ${foe.name}`);
+          results.push(`you take the land you marked, ${(terms.drawnShare * 100).toFixed(1)}% of ${foe.name}`);
+        }
+      }
+      if (foe && terms.cede) {
+        const front = war.fronts[standing.theirsFront];
+        const held = front ? frontOccupation(war, front, world.countries) : null;
+        const ring = body.cededRing as [number, number][] | undefined;
+        if (held && ring && ring.length >= 3) {
+          transferLand(world, held.territory, enemy, held.share, ring, `Ceded by ${c.name}`);
+          results.push(`you cede ${(held.share * 100).toFixed(1)}% of ${world.countries[held.territory]?.name}`);
+        }
+      }
+      if (foe && terms.reparations) {
+        const amount = foe.economy.gdp * Math.abs(terms.reparations);
+        const payer = terms.reparations > 0 ? foe : c;
+        const payee = terms.reparations > 0 ? c : foe;
+        payer.economy.fiscal.debt += amount;
+        payee.economy.fiscal.debt = Math.max(0, payee.economy.fiscal.debt - amount);
+        results.push(`${payer.name} pays ${(amount / 1e9).toFixed(1)}B in reparations`);
+      }
+
+      // Everything not transferred goes back to its owner.
+      const leaving = [c.id, ...(war.belligerents[c.id] ?? [])];
+      for (const f of war.fronts) {
+        if (f.belligerents.includes(c.id) && f.belligerents.includes(enemy)) f.theatre = "none";
+      }
+      const others = Object.keys(war.belligerents).filter((b) => b !== c.id && b !== enemy);
+      if (others.length) {
+        delete war.belligerents[c.id];
+        war.fronts = war.fronts.filter((f) => !f.belligerents.includes(c.id));
+      }
+      if (!others.length || !war.fronts.length) {
+        war.endedAt = Math.max(1, world.t); // 0 would read as "still running" on day one
+        war.outcome = terms.annexOccupied || terms.annexWhole || terms.drawnShare ? "victory" : terms.cede ? "defeat" : "white-peace";
+        for (const b of Object.keys(war.belligerents)) {
+          const x = world.countries[b];
+          if (x) x.wars = x.wars.filter((w) => w !== war.id);
+          for (const a of war.belligerents[b] ?? []) {
+            const y = world.countries[a];
+            if (y) y.wars = y.wars.filter((w) => w !== war.id);
+          }
+        }
+      }
+      for (const id of leaving) {
+        const x = world.countries[id];
+        if (x) x.wars = x.wars.filter((w) => w !== war.id);
+      }
+      const summary = results.length ? results.join("; ") : "a return to the old borders";
+      pushEvent(world, { kind: "military", severity: "major", country: c.id, title: `Peace ends the ${war.name}`, body: `Terms: ${summary}.`, actors: [c.id, enemy], tags: ["war", "peace"] });
+      return { ok: true, message: `Peace signed: ${summary}.` };
+    }
     case "seek-peace": {
       const war = world.wars[String(body.war)];
       if (!war || war.endedAt || !war.belligerents[c.id]) return { ok: false, message: "You are not fighting that war." };
@@ -219,7 +305,7 @@ export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Reco
       if (theirs + Math.max(0, position) * 0.3 < 28 && !body.force) return { ok: false, message: "The enemy still believes it can win. They refuse to talk yet." };
       const reparations = position < -25 ? e.gdp * clamp((-position - 25) * 0.002, 0.01, 0.2) : 0;
       if (reparations > 0) e.fiscal.debt += reparations;
-      war.endedAt = world.t;
+      war.endedAt = Math.max(1, world.t); // 0 would read as "still running" on day one
       war.outcome = "white-peace";
       for (const b of Object.keys(war.belligerents)) {
         const x = world.countries[b];
