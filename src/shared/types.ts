@@ -534,6 +534,16 @@ export interface EconomyHistoryPoint {
   debtToGdp: number;
   /** Index of the main national stock exchange, 1000 at scenario start. */
   stockIndex: number;
+  gdpPerCapita?: number;
+  population?: number;
+  policyRate?: number;
+  bondYield?: number;
+  budgetBalance?: number;
+  tradeBalance?: number;
+  exchangeRate?: number;
+  medianWage?: number;
+  approval?: number;
+  militarySpend?: number;
 }
 
 // ===========================================================================

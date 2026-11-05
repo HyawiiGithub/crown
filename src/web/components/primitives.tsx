@@ -128,7 +128,7 @@ export function Slider({ label, value, min, max, step, onChange, suffix }: { lab
  * no legend; the title names the series. `zero` draws a reference line at 0 when it
  * falls inside the range.
  */
-export function Spark({ title, values, format, zero }: { title: string; values: number[]; format: (v: number) => string; zero?: boolean }) {
+export function Spark({ title, values, format, zero, labels }: { title: string; values: number[]; format: (v: number) => string; zero?: boolean; labels?: string[] }) {
   const [hover, setHover] = useState<number | null>(null);
   const w = 160;
   const h = 44;
@@ -156,6 +156,12 @@ export function Spark({ title, values, format, zero }: { title: string; values: 
         <path d={d} fill="none" stroke="var(--accent-2)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
         {hover !== null && <line x1={x(hover)} x2={x(hover)} y1={0} y2={h} stroke="var(--ink-muted)" strokeWidth={1} vectorEffect="non-scaling-stroke" />}
       </svg>
+      {labels && labels.length > 1 && (
+        <figcaption className="row dim mono" style={{ justifyContent: "space-between", fontSize: 10 }}>
+          <span>{hover !== null ? labels[hover] : labels[0]}</span>
+          {hover === null && <span>{labels[labels.length - 1]}</span>}
+        </figcaption>
+      )}
     </figure>
   );
 }

@@ -57,6 +57,7 @@ export function CountryPanel({ country }: { country: Country | null }) {
   const mine = c.id === player;
   const tabs = [
     { id: "overview", label: "Overview" },
+    { id: "charts", label: "Charts" },
     { id: "budget", label: "Budget" },
     { id: "bank", label: "Money" },
     { id: "sectors", label: "Sectors" },
@@ -84,6 +85,7 @@ export function CountryPanel({ country }: { country: Country | null }) {
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
       <div className="scroll pad grow" style={{ minHeight: 0 }}>
         {tab === "overview" && <Overview c={c} mine={mine} />}
+        {tab === "charts" && <Charts c={c} />}
         {tab === "budget" && <Budget c={c} mine={mine} />}
         {tab === "bank" && <Bank c={c} mine={mine} />}
         {tab === "sectors" && <Sectors c={c} mine={mine} />}
@@ -144,6 +146,7 @@ function Overview({ c, mine }: { c: Country; mine: boolean }) {
       </div>
       {hist.length > 2 ? (
         <div className="spark-grid">
+          <Spark title="GDP" values={hist.map((h) => h.gdp)} format={(v) => `$${credits(v)}`} />
           <Spark title="Real growth" values={hist.map((h) => h.gdpGrowth)} format={(v) => signedPct(v, 1)} zero />
           <Spark title="Inflation" values={hist.map((h) => h.inflation)} format={(v) => signedPct(v, 1)} zero />
           <Spark title="Unemployment" values={hist.map((h) => h.unemployment)} format={(v) => pct(v)} />
@@ -171,6 +174,64 @@ function Overview({ c, mine }: { c: Country; mine: boolean }) {
         <span className="dim" style={{ fontSize: 11 }}>Corruption {pct0(e.corruption)} · Inequality (Gini) {e.inequality.toFixed(2)} · Cohesion {c.cohesion.toFixed(0)}</span>
       </div>
       {!mine && <ChangeCountry c={c} />}
+    </div>
+  );
+}
+
+type HistoryPoint = Country["economy"]["history"][number];
+
+const CHART_GROUPS: { title: string; charts: { title: string; get: (h: HistoryPoint) => number | undefined; format: (v: number) => string; zero?: boolean }[] }[] = [
+  { title: "Output", charts: [
+    { title: "GDP", get: (h) => h.gdp, format: (v) => `$${credits(v)}` },
+    { title: "GDP per person", get: (h) => h.gdpPerCapita, format: (v) => `$${money(v, 0)}` },
+    { title: "Real growth", get: (h) => h.gdpGrowth, format: (v) => signedPct(v, 1), zero: true },
+    { title: "Population", get: (h) => h.population, format: (v) => credits(v) },
+  ] },
+  { title: "Prices and money", charts: [
+    { title: "Inflation", get: (h) => h.inflation, format: (v) => signedPct(v, 1), zero: true },
+    { title: "Policy rate", get: (h) => h.policyRate, format: (v) => pct(v, 2), zero: true },
+    { title: "Bond yield", get: (h) => h.bondYield, format: (v) => pct(v, 2) },
+    { title: "Currency per USD (start = 1)", get: (h) => h.exchangeRate, format: (v) => money(v, 3) },
+  ] },
+  { title: "Public finances", charts: [
+    { title: "Debt / GDP", get: (h) => h.debtToGdp, format: (v) => pct0(v) },
+    { title: "Budget balance / GDP", get: (h) => h.budgetBalance, format: (v) => signedPct(v, 1), zero: true },
+    { title: "Military spending", get: (h) => h.militarySpend, format: (v) => `$${credits(v)}` },
+  ] },
+  { title: "People and politics", charts: [
+    { title: "Unemployment", get: (h) => h.unemployment, format: (v) => pct(v) },
+    { title: "Median wage", get: (h) => h.medianWage, format: (v) => `$${money(v, 0)}` },
+    { title: "Government approval", get: (h) => h.approval, format: (v) => `${v.toFixed(0)}%` },
+  ] },
+  { title: "Trade and markets", charts: [
+    { title: "Trade balance / GDP", get: (h) => h.tradeBalance, format: (v) => signedPct(v, 1), zero: true },
+    { title: "Stock index", get: (h) => (h.stockIndex > 0 ? h.stockIndex : undefined), format: (v) => v.toFixed(0) },
+  ] },
+];
+
+function Charts({ c }: { c: Country }) {
+  const start = useStore((s) => s.scenario?.startDate);
+  const [months, setMonths] = useState(0);
+  const all = c.economy.history;
+  const hist = months ? all.slice(-months) : all;
+  if (all.length < 2) return <Empty>Charts build up as the game runs. Start the clock and they fill in within a month or two.</Empty>;
+  return (
+    <div className="stack">
+      <div className="row" style={{ gap: 4 }}>
+        {([[12, "1y"], [60, "5y"], [120, "10y"], [0, "All"]] as [number, string][]).map(([n, label]) => <button key={label} className={`btn btn--sm ${months === n ? "btn--active" : ""}`} onClick={() => setMonths(n)}>{label}</button>)}
+      </div>
+      {CHART_GROUPS.map((g) => {
+        const charts = g.charts.map((chart) => ({ chart, rows: hist.filter((h) => Number.isFinite(chart.get(h))) })).filter((x) => x.rows.length > 1);
+        if (!charts.length) return null;
+        return (
+          <section key={g.title}>
+            <div className="eyebrow" style={{ marginBottom: 6 }}>{g.title}</div>
+            <div className="spark-grid">
+              {charts.map(({ chart, rows }) => <Spark key={chart.title} title={chart.title} zero={chart.zero} format={chart.format} values={rows.map((h) => chart.get(h) as number)} labels={start ? rows.map((h) => simDate(start, h.t).slice(0, 7)) : undefined} />)}
+            </div>
+          </section>
+        );
+      })}
     </div>
   );
 }
