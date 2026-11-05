@@ -1,5 +1,6 @@
 import type { Country, Sanction, Treaty, War, World } from "../shared/types";
 import { pushEvent } from "./bootstrap";
+import { frontOccupation } from "./occupation";
 import { Rng, approach, clamp, clamp01 } from "./rng";
 import { SECONDS_PER_YEAR } from "./step-economy";
 
@@ -125,7 +126,11 @@ export function stepWars(world: World, rnd: Rng, dt: number): void {
       }
       if (!c) continue;
       const allyPower = allies.reduce((a, al) => a + (world.countries[al]?.military.activeDuty ?? 0) * (world.countries[al]?.military.readiness ?? 0) / 100, 0);
-      const own = c.military.activeDuty * (0.4 + c.military.readiness / 100) * (c.military.morale / 100);
+      // Money per soldier matters as well as numbers, so the defence budget moves the front.
+      const perSoldier = c.economy.fiscal.military / Math.max(1, c.military.activeDuty);
+      const worldPc = world.globals.globalGdp / Math.max(1, world.globals.globalPopulation);
+      const equipment = clamp(Math.pow(perSoldier / Math.max(1e-6, worldPc * 4), 0.25), 0.55, 1.8);
+      const own = c.military.activeDuty * (0.4 + c.military.readiness / 100) * (c.military.morale / 100) * equipment;
       strength[b] = own + allyPower * 0.8;
     }
 
@@ -149,7 +154,8 @@ export function stepWars(world: World, rnd: Rng, dt: number): void {
 
       // Attrition: both sides bleed, faster when the front is hot.
       const intensity = clamp(Math.log2(ratio + 1) / 3, 0, 2);
-      const casualtyRate = P.warDamage * intensity * (dt / 86400) * 0.6;
+      const attacking = front.belligerents.some((b) => war.stance?.[b] === "offensive");
+      const casualtyRate = P.warDamage * intensity * (dt / 86400) * 0.6 * (attacking ? 1.5 : 1);
       for (const b of front.belligerents) {
         const c = world.countries[b];
         const rebels = war.rebels?.[b];
@@ -161,13 +167,23 @@ export function stepWars(world: World, rnd: Rng, dt: number): void {
           c.military.readiness = clamp(c.military.readiness - casualtyRate * 90, 0, 100);
           c.military.activeDuty = Math.max(100, c.military.activeDuty - force * casualtyRate * 0.3);
         }
-        war.exhaustion[b] = clamp((war.exhaustion[b] ?? 0) + casualtyRate * 200, 0, 100);
+        war.exhaustion[b] = clamp((war.exhaustion[b] ?? 0) + casualtyRate * 90, 0, 100);
         war.publicSupport[b] = clamp((war.publicSupport[b] ?? 50) - casualtyRate * 120, 0, 100);
       }
 
       // Movement.
-      const push = clamp(Math.log(Math.max(0.05, ratio)) * 0.5, -1, 1) * (dt / (SECONDS_PER_YEAR * 1.2));
-      front.control = clamp(front.control + push * 100 + rnd.normal() * 0.15, -100, 100);
+      // Fronts grind. Even a clear edge takes years, faster on open ground and with orders to attack.
+      const stanceOf = (b: string) => war.stance?.[b] ?? "balanced";
+      const advancing = ratio >= 1 ? front.belligerents[0] : front.belligerents[1];
+      const holding = ratio >= 1 ? front.belligerents[1] : front.belligerents[0];
+      const orders = (stanceOf(advancing) === "offensive" ? 1.8 : stanceOf(advancing) === "defensive" ? 0.25 : 1) * (stanceOf(holding) === "defensive" ? 0.5 : stanceOf(holding) === "offensive" ? 1.3 : 1);
+      // Peer wars creep a few percent a year; a giant against a minnow breaks through.
+      const edge = Math.log(Math.max(0.001, ratio)) * 0.5;
+      const breakthrough = Math.sign(edge) * (Math.abs(edge) + Math.max(0, Math.abs(edge) - 1) ** 2);
+      const pace = clamp(breakthrough, -8, 8) * orders * (dt / (SECONDS_PER_YEAR * 20));
+      const wobble = rnd.normal() * 0.05 * Math.sqrt(dt / 86400);
+      front.control = clamp(front.control + pace * 100 + wobble, -100, 100);
+      announceFront(world, war, front);
 
       const owner = world.countries[front.belligerents[1]];
       if (owner) {
@@ -190,8 +206,26 @@ export function stepWars(world: World, rnd: Rng, dt: number): void {
 
   // Clean up finished wars so the war panel stays readable.
   for (const [id, w] of Object.entries(world.wars)) {
-    if (w.endedAt && world.t - w.endedAt > SECONDS_PER_YEAR * 3) delete world.wars[id];
+    // A war that ended on a ceasefire line stays on the books while the line is on the map.
+    const frozen = w.endedAt && w.fronts.some((f) => (frontOccupation(w, f, world.countries)?.share ?? 0) > 0.02);
+    if (w.endedAt && !frozen && world.t - w.endedAt > SECONDS_PER_YEAR * 3) delete world.wars[id];
   }
+}
+
+/** Put big moves of the line on the wire, in 5% steps. */
+function announceFront(world: World, war: War, front: War["fronts"][number]): void {
+  const o = frontOccupation(war, front, world.countries);
+  if (!o) return;
+  const bucket = Math.floor((o.share * 100) / 5);
+  if (front.lastBucket === undefined) {
+    front.lastBucket = bucket;
+    return;
+  }
+  if (bucket === front.lastBucket) return;
+  const advancing = bucket > front.lastBucket;
+  front.lastBucket = bucket;
+  const land = world.countries[o.territory];
+  pushEvent(world, { kind: "military", severity: "notice", country: o.territory, title: `${o.holderName} ${advancing ? "advances" : "falls back"}: now holds ${bucket * 5}% of ${land.name}`, body: `The line moves on the ${front.name} front.`, tags: ["war", "front"] });
 }
 
 function nextPhase(war: War, exhaustion: number, decided: number): War["phase"] {
@@ -300,7 +334,12 @@ function concludeWar(world: World, war: War, rnd: Rng): void {
   const lc = world.countries[loser];
   const terms: string[] = [];
 
-  if (margin > 60 && wc && lc && wc.economy.gdp > lc.economy.gdp * 0.6 && lc.id !== world.playerCountry && rnd.chance(0.5)) {
+  // Conquest needs the ground. Short of that, the war ends on the line it reached.
+  const heldOfLoser = Math.max(0, ...war.fronts.map((f) => {
+    const o = frontOccupation(war, f, world.countries);
+    return o && o.territory === loser && o.holder === winner ? o.share : 0;
+  }));
+  if (heldOfLoser >= 0.8 && wc && lc && lc.id !== world.playerCountry) {
     annex(world, winner, loser, "Territorial concession at the end of the war");
     terms.push(`${lc?.name} is annexed in its entirety`);
   } else if (wc && lc) {

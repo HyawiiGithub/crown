@@ -200,6 +200,14 @@ export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Reco
       c.executive.approval = clamp(c.executive.approval + (rulesByDecree(c.government) ? 2 : -4), 0, 100);
       return { ok: true, message: war.name };
     }
+    case "set-stance": {
+      const war = world.wars[String(body.war)];
+      const stance = String(body.stance);
+      if (!war || war.endedAt || !war.belligerents[c.id]) return { ok: false, message: "You are not fighting that war." };
+      if (stance !== "offensive" && stance !== "balanced" && stance !== "defensive") return { ok: false, message: "Unknown orders." };
+      war.stance = { ...war.stance, [c.id]: stance };
+      return { ok: true, message: stance === "offensive" ? "Offensive ordered. Casualties will rise." : stance === "defensive" ? "Your forces dig in." : "Normal operations." };
+    }
     case "seek-peace": {
       const war = world.wars[String(body.war)];
       if (!war || war.endedAt || !war.belligerents[c.id]) return { ok: false, message: "You are not fighting that war." };

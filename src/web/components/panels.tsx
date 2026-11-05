@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { BudgetPlan, Character, Company, Country, MarketState, SectorId, Sanction, TaxPolicy, Treaty, War } from "../../shared/types";
 import { SECTORS, COMMODITY_LABELS } from "../../data/economy";
 import { COUNTRY_BY_ISO3 } from "../../data/countries";
+import { frontOccupation, occupiedShare } from "../../sim/occupation";
 import { act, can, useStore } from "../store";
 import { credits, money, pct, pct0, people, signedPct, GOVERNMENT_LABELS, deltaClass, simDate, YEAR } from "../format";
 import { Bar, Chip, DataTable, Empty, Panel, Spark, Stat, Tabs } from "./primitives";
@@ -99,6 +100,8 @@ export function CountryPanel({ country }: { country: Country | null }) {
 
 function Overview({ c, mine }: { c: Country; mine: boolean }) {
   const characters = useStore((s) => s.characters);
+  const wars = useStore((s) => s.wars);
+  const countries = useStore((s) => s.countries);
   const start = useStore((s) => s.scenario?.startDate);
   const e = c.economy;
   const m = e.macro;
@@ -108,6 +111,8 @@ function Overview({ c, mine }: { c: Country; mine: boolean }) {
   if (e.labour.unemployment > 0.1) alerts.push(`Unemployment is ${pct(e.labour.unemployment)}.`);
   if (m.riskPremium > 0.05) alerts.push(`Bond markets charge a ${pct(m.riskPremium)} risk premium.`);
   if (m.defaulted) alerts.push("The state is in default.");
+  const occupied = occupiedShare(c, wars, countries);
+  if (occupied >= 0.005) alerts.push(`${(occupied * 100).toFixed(1)}% of the country is under enemy control.`);
   if (m.npl > 0.1) alerts.push(`Bad loans have reached ${pct0(m.npl)} of lending.`);
   if (c.executive.approval < 30) alerts.push(`Approval is down to ${pct0(c.executive.approval / 100)}.`);
   const hist = e.history;
@@ -627,6 +632,8 @@ function Foreign({ c, mine }: { c: Country; mine: boolean }) {
             <strong style={{ fontSize: 12 }}>{w.name}</strong>
             <div className="dim" style={{ fontSize: 11 }}>{w.cause}</div>
             <Stat label="Exhaustion" value={Math.round(w.exhaustion[c.id] ?? 0)} />
+            {w.fronts.map((f) => { const label = occupationLabel(w, f, countries); return label ? <div key={f.id} className="mono" style={{ fontSize: 11 }}>{label}</div> : null; })}
+            {mine && w.belligerents[c.id] && <StanceButtons war={w} player={c.id} />}
             {mine && w.belligerents[c.id] && <button className="btn btn--sm" style={{ marginTop: 4 }} onClick={() => void act({ type: "seek-peace", war: w.id })}>Seek peace</button>}
           </div>
         ))}
@@ -767,10 +774,27 @@ export function MarketPanel({ markets, companies }: { markets: MarketState | nul
 // Wars
 // ===========================================================================
 
+function occupationLabel(w: War, f: War["fronts"][number], countries: Record<string, Country>): string {
+  const o = frontOccupation(w, f, countries);
+  return o && o.share >= 0.005 ? `${o.holderName} holds ${(o.share * 100).toFixed(1)}% of ${countries[o.territory].name}` : "";
+}
+
+function StanceButtons({ war, player }: { war: War; player: string }) {
+  const current = war.stance?.[player] ?? "balanced";
+  return (
+    <div className="row" style={{ gap: 4, marginTop: 6 }}>
+      {(["offensive", "balanced", "defensive"] as const).map((s) => (
+        <button key={s} className={`btn btn--sm ${current === s ? "btn--active" : ""}`} onClick={() => void act({ type: "set-stance", war: war.id, stance: s })}>{s === "offensive" ? "Attack" : s === "balanced" ? "Hold" : "Dig in"}</button>
+      ))}
+    </div>
+  );
+}
+
 export function WarPanel({ wars, countries, onPick }: { wars: War[]; countries: Record<string, Country>; onPick: (id: string) => void }) {
   const active = wars.filter((w) => !w.endedAt);
   const ended = wars.filter((w) => w.endedAt);
   const name = (w: War, id: string) => countries[id]?.name ?? w.rebels?.[id]?.name ?? id;
+  const player = useStore((s) => s.playerCountry);
   return (
     <div className="scroll pad grow" style={{ minHeight: 0 }}>
       <div className="row" style={{ marginBottom: 10 }}>
@@ -790,7 +814,7 @@ export function WarPanel({ wars, countries, onPick }: { wars: War[]; countries: 
           ))}
           {w.fronts.map((f) => (
             <div key={f.id} style={{ marginTop: 6 }}>
-              <div className="row" style={{ justifyContent: "space-between", fontSize: 11 }}><span className="dim truncate">{f.name}</span></div>
+              <div className="row" style={{ justifyContent: "space-between", fontSize: 11 }}><span className="dim truncate">{f.name}</span><span className="mono">{occupationLabel(w, f, countries)}</span></div>
               <div className="front" title={`${name(w, f.belligerents[0])} on the left`}>
                 <span style={{ width: `${(f.control + 100) / 2}%`, background: countries[f.belligerents[0]]?.mapColor ?? "var(--accent-2)" }} />
                 <span style={{ flex: 1, background: countries[f.belligerents[1]]?.mapColor ?? "var(--ink-muted)" }} />
@@ -798,6 +822,7 @@ export function WarPanel({ wars, countries, onPick }: { wars: War[]; countries: 
             </div>
           ))}
           <Stat label="Casualties" value={Math.round(Object.values(w.casualties).reduce((a, b) => a + b, 0)).toLocaleString("en-US")} />
+          {player && w.belligerents[player] && <StanceButtons war={w} player={player} />}
         </div>
       ))}
       {ended.length > 0 && (

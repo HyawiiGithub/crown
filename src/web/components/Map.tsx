@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { geoNaturalEarth1, geoGraticule10, geoPath, type GeoPath } from "d3-geo";
+import { geoNaturalEarth1, geoGraticule10, geoPath, type GeoPath, type GeoProjection } from "d3-geo";
 import { feature } from "topojson-client";
 import type { Topology } from "topojson-specification";
-import type { Country, MapRegion, War } from "../../shared/types";
+import type { Country, Front, MapRegion, War } from "../../shared/types";
 import { COUNTRY_BY_ISO3 } from "../../data/countries";
+import { frontOccupation } from "../../sim/occupation";
 import { makeScale, sampleRamp, type ScaleId, type Theme } from "../theme";
 
 /**
@@ -130,6 +131,32 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
     for (const c of drawn) byIso.set(c.key, c.path);
     return byIso;
   }, [drawn]);
+
+  // ---- frontlines ---------------------------------------------------------
+  // Sampled once per pair of states; the line then only slides along the axis.
+  // The cache belongs to one projection: a resize must never reuse old coordinates.
+  const frontCache = useMemo(() => new Map<string, FrontGeometry | null>(), [raw, projection]);
+
+  const fronts = useMemo(() => {
+    if (!raw) return [];
+    const out: { key: string; hosts: string[]; area: string; line: string; holderName: string; territory: string; holder: string; share: number; ended: boolean }[] = [];
+    for (const w of wars) {
+      w.fronts.forEach((f, i) => {
+        const o = frontOccupation(w, f, countries);
+        if (!o || o.share < 0.004) return;
+        const cacheKey = `${o.holder}>${o.territory}>${f.axis?.join(",") ?? ""}`;
+        let geo = frontCache.get(cacheKey);
+        if (geo === undefined) {
+          geo = buildFrontGeometry(raw, control, o.territory, o.holder, f.axis, projection, pathGen);
+          frontCache.set(cacheKey, geo);
+        }
+        if (!geo) return;
+        const shape = frontShape(geo, o.share, cacheKey);
+        out.push({ key: `${w.id}-${i}`.replace(/[^a-zA-Z0-9-]/g, "-"), hosts: geo.hosts, area: shape.area, line: shape.line, holderName: o.holderName, territory: o.territory, holder: o.holder, share: o.share, ended: Boolean(w.endedAt) });
+      });
+    }
+    return out;
+  }, [raw, wars, countries, control, projection, pathGen, frontCache]);
 
   // ---- layer colours ------------------------------------------------------
   const atWar = useMemo(() => {
@@ -290,6 +317,29 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
             );
           })}
 
+          <defs>
+            {fronts.map((f) => <clipPath id={`front-${f.key}`} key={f.key}>{f.hosts.map((d, i) => <path key={i} d={d} />)}</clipPath>)}
+          </defs>
+          {fronts.map((f) => {
+            const place = `${f.holderName} holds ${(f.share * 100).toFixed(1)}% of ${countries[f.territory]?.name ?? f.territory}`;
+            return (
+              <g key={f.key} clipPath={`url(#front-${f.key})`}>
+                {(layer === "political" || layer === "war") && (
+                  <path
+                    d={f.area}
+                    fill={countries[f.holder]?.mapColor ?? "#27272a"}
+                    fillOpacity={0.86}
+                    onMouseMove={(e) => track(e, f.territory, place)}
+                    onMouseLeave={() => setHover(null)}
+                    onClick={() => pick(countries[f.holder] ? f.holder : f.territory)}
+                    style={{ cursor: "pointer" }}
+                  />
+                )}
+                <path d={f.line} fill="none" stroke={f.ended ? "var(--ink-muted)" : "#ef4444"} strokeWidth={f.ended ? 1.2 : 1.8} strokeDasharray={f.ended ? "4 3" : undefined} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
+              </g>
+            );
+          })}
+
           {/* Outlines for the player's country and the selection, every polygon they own. */}
           {drawn.map((f, i) => {
             const id = control[f.key];
@@ -321,6 +371,7 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
 
       <div className="map-overlay">
         <MapLegend scale={scale} layer={layer} />
+        {fronts.length > 0 && <div className="map-legend row" style={{ gap: 6, marginTop: 4 }}><span style={{ width: 16, height: 2, background: "#ef4444", display: "inline-block" }} /><span className="dim">Frontline</span></div>}
       </div>
 
       <div className="map-controls">
@@ -341,6 +392,111 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
       )}
     </div>
   );
+}
+
+interface FrontGeometry {
+  hosts: string[];
+  origin: [number, number];
+  u: [number, number];
+  v: [number, number];
+  /** Sampled positions of the land along the axis, sorted, so a share maps to a distance. */
+  depths: number[];
+  half: number;
+}
+
+function largestPolygon(f: RawFeature, gen: GeoPath): number[][][] | null {
+  const g = f.geometry as { type?: string; coordinates?: unknown } | undefined;
+  if (g?.type === "Polygon") return g.coordinates as number[][][];
+  if (g?.type !== "MultiPolygon") return null;
+  let best: number[][][] | null = null;
+  let area = -1;
+  for (const c of g.coordinates as number[][][][]) {
+    const a = gen.area({ type: "Polygon", coordinates: c } as never);
+    if (a > area) {
+      area = a;
+      best = c;
+    }
+  }
+  return best;
+}
+
+let sampler: CanvasRenderingContext2D | null = null;
+
+function buildFrontGeometry(raw: RawFeature[], control: Record<string, string>, territory: string, holder: string, axis: Front["axis"], projection: GeoProjection, gen: GeoPath): FrontGeometry | null {
+  const own = (id: string) => raw.filter((f) => control[featureKey(f)] === id).map((f) => largestPolygon(f, gen)).filter(Boolean) as number[][][][];
+  const polys = own(territory);
+  if (!polys.length) return null;
+  const items = polys.map((coordinates) => {
+    const o = { type: "Polygon", coordinates } as never;
+    return { d: gen(o) ?? "", c: gen.centroid(o) as [number, number], a: gen.area(o), b: gen.bounds(o) };
+  });
+  const main = items.reduce((m, x) => (x.a > m.a ? x : m));
+  // Stay on the contiguous mainland: skip far-off possessions.
+  const b0 = main.b;
+  const reach = Math.max(b0[1][0] - b0[0][0], b0[1][1] - b0[0][1]) * 1.6 + 30;
+  const hosts = items.filter((x) => Math.hypot(x.c[0] - main.c[0], x.c[1] - main.c[1]) < reach);
+
+  let origin: [number, number];
+  let target: [number, number];
+  const fromTo = axis ? [projection([axis[0], axis[1]]), projection([axis[2], axis[3]])] : null;
+  if (fromTo?.[0] && fromTo[1]) {
+    origin = fromTo[0];
+    target = fromTo[1];
+  } else {
+    const theirs = own(holder).map((coordinates) => gen.centroid({ type: "Polygon", coordinates } as never) as [number, number]);
+    target = main.c;
+    if (theirs.length) origin = theirs.reduce((m, x) => (Math.hypot(x[0] - target[0], x[1] - target[1]) < Math.hypot(m[0] - target[0], m[1] - target[1]) ? x : m));
+    else origin = [target[0] - 50, target[1] - 25];
+  }
+  const dx = target[0] - origin[0];
+  const dy = target[1] - origin[1];
+  const len = Math.hypot(dx, dy) || 1;
+  const u: [number, number] = [dx / len, dy / len];
+  const v: [number, number] = [-u[1], u[0]];
+
+  sampler ??= document.createElement("canvas").getContext("2d");
+  if (!sampler) return null;
+  const depths: number[] = [];
+  let half = 0;
+  for (const h of hosts) {
+    const p = new Path2D(h.d);
+    const [[x0, y0], [x1, y1]] = h.b;
+    const step = Math.max((x1 - x0) / 44, (y1 - y0) / 44, 0.05);
+    for (let x = x0; x <= x1; x += step) {
+      for (let y = y0; y <= y1; y += step) {
+        if (!sampler.isPointInPath(p, x, y)) continue;
+        depths.push((x - origin[0]) * u[0] + (y - origin[1]) * u[1]);
+        half = Math.max(half, Math.abs((x - origin[0]) * v[0] + (y - origin[1]) * v[1]));
+      }
+    }
+  }
+  if (depths.length < 3) return null;
+  depths.sort((a, b) => a - b);
+  return { hosts: hosts.map((h) => h.d), origin, u, v, depths, half: half + 4 };
+}
+
+/** The held ground, and the line in front of it, for a given share of the land. */
+function frontShape(g: FrontGeometry, share: number, seedText: string): { area: string; line: string } {
+  let seed = 0;
+  for (let i = 0; i < seedText.length; i++) seed = (seed * 31 + seedText.charCodeAt(i)) % 1000;
+  const n = g.depths.length;
+  const depth = g.depths[Math.min(n - 1, Math.floor(clampNum(share, 0, 1) * n))];
+  const spread = g.depths[n - 1] - g.depths[0];
+  const pts: [number, number][] = [];
+  const steps = 30;
+  for (let i = 0; i <= steps; i++) {
+    const s = -g.half + (i / steps) * 2 * g.half;
+    const phase = s / Math.max(1, g.half);
+    const jag = spread * 0.035 * (Math.sin(phase * 4.3 + seed) + 0.6 * Math.sin(phase * 11.7 + seed * 2) + 0.3 * Math.sin(phase * 23 + seed * 3));
+    const t = depth + jag;
+    pts.push([g.origin[0] + g.u[0] * t + g.v[0] * s, g.origin[1] + g.u[1] * t + g.v[1] * s]);
+  }
+  const line = `M${pts.map((p) => `${p[0].toFixed(2)},${p[1].toFixed(2)}`).join("L")}`;
+  const back = g.depths[0] - spread - 20;
+  const end = pts[pts.length - 1];
+  const start = pts[0];
+  const corner = (p: [number, number]) => [p[0] + g.u[0] * (back - depth), p[1] + g.u[1] * (back - depth)].map((x) => x.toFixed(2)).join(",");
+  return { line, area: `${line}L${corner(end)}L${corner(start)}Z` };
 }
 
 function clampNum(v: number, lo: number, hi: number): number {

@@ -1,6 +1,7 @@
 import type { Company, Country, MarketMood, SectorId, SectorState, World } from "../shared/types";
 import { SECTORS } from "../data/economy";
 import { incomeShares, pushEvent, recomputeGlobals, taxCollected } from "./bootstrap";
+import { frontOccupation } from "./occupation";
 import { Rng, approach, clamp, clamp01 } from "./rng";
 
 /**
@@ -848,6 +849,11 @@ export function warLoad(world: World, c: Country): number {
       if (i < 0) continue;
       const losing = i === 0 ? -f.control : f.control;
       load += 0.0012 * Math.max(0, losing + 20) * 0.1;
+    }
+    for (const f of w.fronts) {
+      // Occupied land produces nothing for the country that lost it.
+      const held = frontOccupation(w, f, world.countries);
+      if (held?.territory === c.id) load += held.share * 0.12;
     }
   }
   return clamp(load, 0, 0.3);

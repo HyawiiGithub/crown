@@ -25,7 +25,7 @@ import { SECTOR_IDS } from "../shared/types";
 import { COUNTRY_BY_ISO3, EXTRA_LANDS, GOVERNMENT_TITLES, NAMED_FEATURES, TERRITORY_OWNER, COUNTRIES, colourForCountry } from "../data/countries";
 import { ARCHETYPES, COMMODITY_BASE, EXCHANGES, SECTORS } from "../data/economy";
 import { companiesForYear } from "../data/companies";
-import { TREATIES_BY_YEAR, WARS_BY_YEAR } from "../data/wars";
+import { FRONT_GEO, TREATIES_BY_YEAR, WARS_BY_YEAR } from "../data/wars";
 import { ERA, HISTORY, MACRO_SEEDS, MILITARY_SEEDS, POLITICS, TRADE_BALANCE, type EraSettings, type PolitySeed } from "../data/history";
 import { Rng, clamp, clamp01 } from "./rng";
 
@@ -463,7 +463,7 @@ function hsl(colour: string, dl: number): string {
 
 /** Colours players recognise from period maps. */
 const POLITY_COLOURS: Record<string, string> = {
-  GBR: "hsl(350 62% 52%)", FRA: "hsl(218 58% 48%)", DEU: "hsl(30 18% 42%)", DDR: "hsl(4 48% 40%)", RUS: "hsl(135 32% 40%)", USS: "hsl(0 72% 42%)", AUT: "hsl(42 50% 50%)", OTT: "hsl(165 36% 34%)", ITA: "hsl(95 34% 42%)", USA: "hsl(208 54% 52%)", JPN: "hsl(355 54% 60%)", CHN: "hsl(44 66% 54%)", ESP: "hsl(28 66% 46%)", PRT: "hsl(150 44% 36%)", NLD: "hsl(24 80% 52%)", BEL: "hsl(52 56% 42%)", YUG: "hsl(204 30% 46%)", CSK: "hsl(250 30% 50%)", POL: "hsl(340 42% 62%)",
+  GBR: "hsl(350 62% 52%)", FRA: "hsl(218 58% 48%)", DEU: "hsl(30 18% 42%)", DDR: "hsl(4 48% 40%)", RUS: "hsl(135 32% 40%)", USS: "hsl(0 72% 42%)", AUT: "hsl(42 50% 50%)", OTT: "hsl(165 36% 34%)", ITA: "hsl(95 34% 42%)", USA: "hsl(208 54% 52%)", JPN: "hsl(355 54% 60%)", CHN: "hsl(358 72% 50%)", ESP: "hsl(28 66% 46%)", PRT: "hsl(150 44% 36%)", NLD: "hsl(24 80% 52%)", BEL: "hsl(52 56% 42%)", YUG: "hsl(204 30% 46%)", CSK: "hsl(250 30% 50%)", POL: "hsl(340 42% 62%)",
 };
 
 function buildParties(p: PolitySeed, democratic: boolean, chamber: LegislatureChamberConfig | undefined, year: number, rnd: Rng): Party[] {
@@ -788,7 +788,7 @@ export function buildWorld(scenario: Scenario, name: string, id: string, now: nu
       const present = allies.filter((x) => world.countries[x]);
       if (REBEL_NAMES[b]) {
         const host = world.countries[b.split("_")[0]];
-        rebels[b] = { id: b, name: REBEL_NAMES[b], strength: Math.round((host?.military.activeDuty ?? 30000) * rnd.float(0.25, 0.7)) };
+        rebels[b] = { id: b, name: b === "LBY_REB" && year >= 2000 ? "Libyan National Army" : REBEL_NAMES[b], strength: Math.round((host?.military.activeDuty ?? 30000) * rnd.float(0.25, 0.7)) };
         belligerents[b] = present;
       } else if (world.countries[b]) {
         belligerents[b] = present;
@@ -802,7 +802,7 @@ export function buildWorld(scenario: Scenario, name: string, id: string, now: nu
       phase: w.phase,
       belligerents,
       cause: w.cause,
-      fronts: w.fronts.map((f, i) => ({ ...f, id: `front-${i}`, contestedOutput: 0, openedAt: 0, attritionRate: 0.0004 })),
+      fronts: w.fronts.map((f, i) => ({ ...f, ...FRONT_GEO[w.name], id: `front-${i}`, contestedOutput: 0, openedAt: 0, attritionRate: 0.0004 })),
       exhaustion: w.exhaustion ?? {},
       casualties: w.casualties ?? {},
       materiel: {},
