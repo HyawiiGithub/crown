@@ -343,9 +343,13 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
         const radius = Math.max(70, size.w * 0.16);
         const near = home ? list.filter((p) => Math.hypot(p.x - home[0], p.y - home[1]) < radius) : [];
         const pool = near.length ? near : list;
+        // With a capital, centre on the largest landmass near it. Averaging every
+        // part would let a distant island pull the name off the country (Denmark
+        // ended up labelled on Greenland).
         const total = pool.reduce((a, p) => a + p.area, 0) || 1;
-        const x = pool.reduce((a, p) => a + p.x * p.area, 0) / total;
-        const y = pool.reduce((a, p) => a + p.y * p.area, 0) / total;
+        const anchorPart = near.length ? near.reduce((a, p) => (p.area > a.area ? p : a), near[0]) : null;
+        const x = anchorPart ? anchorPart.x : pool.reduce((a, p) => a + p.x * p.area, 0) / total;
+        const y = anchorPart ? anchorPart.y : pool.reduce((a, p) => a + p.y * p.area, 0) / total;
         const spread = Math.sqrt(total);
         return { id, x, y, w: Math.min(180, spread * 1.7), h: Math.min(90, spread), area: total };
       })
