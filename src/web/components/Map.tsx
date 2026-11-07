@@ -327,10 +327,13 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
       .map(([id, v]) => {
         const anchor = LABEL_ANCHORS[id];
         const home = anchor ? projection(anchor) : null;
-        return home ? { id, x: home[0], y: home[1], w: 140, h: 70, area: v.main.area } : { id, ...v.main };
+        // Size the box from the name so an anchored label gets the same font as a
+        // landmass one, instead of a fixed box that collides with its neighbours.
+        const len = countries[id]?.name.length ?? 10;
+        return home ? { id, x: home[0], y: home[1], w: len * 8, h: 26, area: v.main.area } : { id, ...v.main };
       })
       .sort((a, b) => b.area - a.area);
-  }, [drawn, ownerOf, historical, projection]);
+  }, [drawn, ownerOf, historical, projection, countries]);
 
   // Fit each name inside its land at this zoom, biggest countries first, and never overlap.
   const placedLabels = useMemo(() => {
