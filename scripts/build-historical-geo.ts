@@ -861,6 +861,11 @@ async function build(year: Year): Promise<void> {
       const polity = record ? landToPolity.get(record.iso3) ?? "" : "";
       if (!polity) continue;
       const pt = centroid(m);
+      // A land only a couple of degrees across is a dot at map scale. Giving it an
+      // outline turns the seas and Europe into a field of small circles, so those
+      // are left to the base layer, which paints them without a border.
+      const box = bboxOf(m.geometry);
+      if (Math.max(box[2] - box[0], box[3] - box[1]) < 0.8) continue;
       // Already drawn by the land's own polity? Then leave the historical shape be.
       if (shapes.some((s) => ownerKey(s) === polity && pointInGeometry(s.geometry, pt))) continue;
       fillFor.set(numeric, {
