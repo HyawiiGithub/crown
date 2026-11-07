@@ -353,7 +353,12 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
         // near the capital at all (Denmark's peninsula is missing from the 1900 file),
         // name it at the capital rather than on a distant possession.
         const dist = (p: { x: number; y: number }) => (home ? Math.hypot(p.x - home[0], p.y - home[1]) : 0);
-        const anchorPart = near.length ? near.reduce((a, p) => (dist(p) < dist(a) ? p : a), near[0]) : null;
+        // Ignore specks: a small island can sit closer to the capital than the
+        // mainland and pull the name offshore (the Ottomans landed on Cyprus).
+        const biggest = near.reduce((a, p) => Math.max(a, p.area), 0);
+        const major = near.filter((p) => p.area >= biggest * 0.2);
+        const candidates = major.length ? major : near;
+        const anchorPart = candidates.length ? candidates.reduce((a, p) => (dist(p) < dist(a) ? p : a), candidates[0]) : null;
         const x = anchorPart ? anchorPart.x : home ? home[0] : pool.reduce((a, p) => a + p.x * p.area, 0) / total;
         const y = anchorPart ? anchorPart.y : home ? home[1] : pool.reduce((a, p) => a + p.y * p.area, 0) / total;
         const spread = Math.sqrt(total);
