@@ -314,9 +314,11 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
     (f: Drawn): string => {
       const now = control[f.key];
       if (!historical) return now || f.key;
-      const start = dayOne.get(f.key);
-      if (!now || (start && now === start)) return f.fallback || now || "";
-      return now;
+      // Whose land it is decides the colour, not who the source drew on it: the
+      // historical files carry hundreds of native polities scattered inside the
+      // colonial borders, which turned Africa into confetti of petty states. The
+      // basemap's own polity only fills land the scenario assigns to nobody.
+      return now || f.fallback || "";
     },
     [control, historical, dayOne],
   );
