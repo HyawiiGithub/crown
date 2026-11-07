@@ -48,7 +48,9 @@ interface Drawn {
   area: number;
   /** Polity to use when `control` has no mapping for `key` (historical basemaps). */
   fallback: string;
-  /** The largest single landmass: where a name belongs. */
+  /** Every polygon's centroid in screen space, so a name can sit on the whole land. */
+  parts: { x: number; y: number; area: number }[];
+  /** The largest single landmass. */
   main: { x: number; y: number; w: number; h: number; area: number };
 }
 
@@ -174,7 +176,14 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
       const [[x0, y0], [x1, y1]] = pathGen.bounds(shape);
       const name = historicalSource ? String(f.properties?.n ?? key) : String(f.properties?.name ?? key);
       const fallback = historicalSource ? String(f.properties?.p ?? "") : "";
-      out.push({ key, numeric: key, name, path: d, centroid: pathGen.centroid(f as never) as [number, number], area: pathGen.area(f as never), fallback, main: { x: cx, y: cy, w: x1 - x0, h: y1 - y0, area: pathGen.area(shape) } });
+      const parts = polygonsOf(f)
+        .map((coords) => {
+          const shapePart = { type: "Polygon", coordinates: coords } as never;
+          const [px, py] = pathGen.centroid(shapePart);
+          return { x: px, y: py, area: pathGen.area(shapePart) };
+        })
+        .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y) && p.area > 0);
+      out.push({ key, numeric: key, name, path: d, centroid: pathGen.centroid(f as never) as [number, number], area: pathGen.area(f as never), fallback, parts, main: { x: cx, y: cy, w: x1 - x0, h: y1 - y0, area: pathGen.area(shape) } });
     }
     return out;
   }, [raw, historical, pathGen]);
@@ -310,27 +319,33 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
     [control, historical, dayOne],
   );
 
-  // ---- labels: the biggest polygon in each polity's heartland --------------
+  // ---- labels: the centre of each polity's own land ------------------------
   const labels = useMemo(() => {
-    const best = new Map<string, { main: Drawn["main"]; onHome: boolean }>();
+    const shapes = new Map<string, { x: number; y: number; area: number }[]>();
     for (const f of drawn) {
       const id = ownerOf(f);
       // Overseas territories do not carry the owner's name: no "Denmark" on Greenland.
       if (!id || (!historical && TERRITORY_OWNER[f.key])) continue;
-      const cur = best.get(id);
-      if (!cur || f.main.area > cur.main.area) best.set(id, { main: f.main, onHome: true });
+      const list = shapes.get(id) ?? [];
+      list.push(...f.parts);
+      shapes.set(id, list);
     }
-    // A polity with a known capital is labelled there: its largest polygon can be a
-    // colony or a desert, which is why Denmark landed on Greenland and the Ottoman
-    // Empire in Arabia. Everything else keeps its biggest landmass.
-    return [...best.entries()]
-      .map(([id, v]) => {
+    return [...shapes.entries()]
+      .map(([id, list]) => {
+        // Centre the name on the nation's own land, weighted by area, rather than on
+        // one polygon: an empire's largest polygon can be a colony or a desert. When
+        // a capital is known, stay near it so overseas land cannot drag the name off
+        // the country it belongs to.
         const anchor = LABEL_ANCHORS[id];
         const home = anchor ? projection(anchor) : null;
-        // Size the box from the name so an anchored label gets the same font as a
-        // landmass one, instead of a fixed box that collides with its neighbours.
-        const len = countries[id]?.name.length ?? 10;
-        return home ? { id, x: home[0], y: home[1], w: len * 8, h: 26, area: v.main.area } : { id, ...v.main };
+        const radius = Math.max(70, size.w * 0.16);
+        const near = home ? list.filter((p) => Math.hypot(p.x - home[0], p.y - home[1]) < radius) : [];
+        const pool = near.length ? near : list;
+        const total = pool.reduce((a, p) => a + p.area, 0) || 1;
+        const x = pool.reduce((a, p) => a + p.x * p.area, 0) / total;
+        const y = pool.reduce((a, p) => a + p.y * p.area, 0) / total;
+        const spread = Math.sqrt(total);
+        return { id, x, y, w: Math.min(180, spread * 1.7), h: Math.min(90, spread), area: total };
       })
       // Sovereign states get their names before their colonies do, so an empire
       // is never crowded off the map by "Anglo-Egyptian Sudan" sitting next to it.
@@ -340,7 +355,7 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
         if (depA !== depB) return depA - depB;
         return b.area - a.area;
       });
-  }, [drawn, ownerOf, historical, projection, countries]);
+  }, [drawn, ownerOf, historical, projection, countries, size.w]);
 
   // Fit each name inside its land at this zoom, biggest countries first, and never overlap.
   const placedLabels = useMemo(() => {
@@ -662,6 +677,14 @@ interface FrontGeometry {
   /** Sampled positions of the land along the axis, sorted, so a share maps to a distance. */
   depths: number[];
   half: number;
+}
+
+/** Every polygon of a feature, so a name can be centred on the land as a whole. */
+function polygonsOf(f: RawFeature): number[][][][] {
+  const g = f.geometry as { type?: string; coordinates?: unknown } | undefined;
+  if (g?.type === "Polygon") return [g.coordinates as number[][][]];
+  if (g?.type === "MultiPolygon") return g.coordinates as number[][][][];
+  return [];
 }
 
 function largestPolygon(f: RawFeature, gen: GeoPath): number[][][] | null {
