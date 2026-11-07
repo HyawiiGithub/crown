@@ -840,20 +840,17 @@ async function build(year: Year): Promise<void> {
     const owner = ownerOfLand(iso3);
     if (!owner || !known.has(owner)) continue;
     let covered = 0;
-    let foreign = 0;
     for (const pt of pts) {
-      const hits = outlines.filter((o) => pt[0] >= o.box[0] && pt[0] <= o.box[2] && pt[1] >= o.box[1] && pt[1] <= o.box[3] && pointInGeometry(o.geometry, pt));
-      if (hits.length) covered++;
-      if (hits.some((h) => h.p && h.p !== owner)) foreign++;
+      if (outlines.some((o) => pt[0] >= o.box[0] && pt[0] <= o.box[2] && pt[1] >= o.box[1] && pt[1] <= o.box[3] && pointInGeometry(o.geometry, pt))) covered++;
     }
     // Fill whenever the source leaves a visible hole, not only when it leaves most
     // of the land blank: a half-drawn colony still showed empty spaces. Europe is
     // exempt: there the source is dense, so a surviving hole means a border that
     // really moved (Alsace, Schleswig, East Prussia) and a modern outline would
-    // paint today's frontier over it. Elsewhere a heavy foreign overlap still wins.
+    // paint today's frontier over it. Everywhere else the outline sits underneath
+    // the historical polygons, which are smaller and keep painting over it.
     if (COUNTRY_BY_ISO3[iso3]?.continent === "Europe") continue;
     if (covered / pts.length >= 0.9) continue;
-    if (foreign / pts.length > 0.6) continue;
     out.features.push({
       type: "Feature",
       // The map keys ownership off `id` first, then the name. A fallback outline
