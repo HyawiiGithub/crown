@@ -364,7 +364,11 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
         const x = anchorPart ? anchorPart.x : home ? home[0] : pool.reduce((a, p) => a + p.x * p.area, 0) / total;
         const y = anchorPart ? anchorPart.y : home ? home[1] : pool.reduce((a, p) => a + p.y * p.area, 0) / total;
         const spread = Math.sqrt(total);
-        return { id, x, y, w: Math.min(180, spread * 1.7), h: Math.min(90, spread), area: total };
+        // Second choice: the polity's biggest landmass, in case the first spot collides
+        // with a neighbour and the label would otherwise be dropped entirely (Russia
+        // lost its name once it was pinned at St Petersburg).
+        const largest = list.reduce<{ x: number; y: number; area: number } | null>((a, p) => (!a || p.area > a.area ? p : a), null);
+        return { id, x, y, altX: largest?.x ?? x, altY: largest?.y ?? y, w: Math.min(180, spread * 1.7), h: Math.min(90, spread), area: total };
       })
       // Sovereign states get their names before their colonies do, so an empire
       // is never crowded off the map by "Anglo-Egyptian Sudan" sitting next to it.
