@@ -176,7 +176,7 @@ app.get("/api/auth/discord/callback", async (c) => {
     const { token } = await createSession(c.env, user, ip, c.req.header("user-agent") ?? undefined);
     await audit(c.env, { userId: user.id, username: user.username, action: "auth.login", target: user.id, ip });
 
-    c.header("set-cookie", sessionCookie(c.env, token, 60 * 60 * 24 * 30));
+    c.header("set-cookie", sessionCookie(c.env, token, 60 * 60 * 24 * 30, c.req.url));
     return c.redirect(returnTo);
   } catch (err) {
     return c.redirect(`/?error=${encodeURIComponent(err instanceof Error ? err.message : "Login failed")}`);
@@ -230,7 +230,7 @@ app.get("/api/auth/google/callback", async (c) => {
     const { token } = await createSession(c.env, user, ip, c.req.header("user-agent") ?? undefined);
     await audit(c.env, { userId: user.id, username: user.username, action: "auth.login.google", target: user.id, ip });
 
-    c.header("set-cookie", sessionCookie(c.env, token, 60 * 60 * 24 * 30));
+    c.header("set-cookie", sessionCookie(c.env, token, 60 * 60 * 24 * 30, c.req.url));
     return c.redirect(returnTo);
   } catch (err) {
     return c.redirect(`/?error=${encodeURIComponent(err instanceof Error ? err.message : "Google sign-in failed")}`);
@@ -254,7 +254,7 @@ app.post("/api/auth/register", async (c) => {
   const user = await registerWithPassword(c.env, email, password, username);
   const { token } = await createSession(c.env, user, c.req.header("cf-connecting-ip") ?? undefined, c.req.header("user-agent") ?? undefined);
   await audit(c.env, { userId: user.id, username: user.username, action: "auth.register", target: user.id, ip });
-  c.header("set-cookie", sessionCookie(c.env, token, 60 * 60 * 24 * 30));
+  c.header("set-cookie", sessionCookie(c.env, token, 60 * 60 * 24 * 30, c.req.url));
   return c.json({ user });
 });
 
@@ -272,7 +272,7 @@ app.post("/api/auth/login", async (c) => {
     const user = await loginWithPassword(c.env, email, password);
     const { token } = await createSession(c.env, user, c.req.header("cf-connecting-ip") ?? undefined, c.req.header("user-agent") ?? undefined);
     await audit(c.env, { userId: user.id, username: user.username, action: "auth.login.password", target: user.id, ip });
-    c.header("set-cookie", sessionCookie(c.env, token, 60 * 60 * 24 * 30));
+    c.header("set-cookie", sessionCookie(c.env, token, 60 * 60 * 24 * 30, c.req.url));
     return c.json({ user });
   } catch (err) {
     await recordLoginAttempt(c.env, `login:ip:${ip}`);
@@ -294,7 +294,7 @@ app.post("/api/auth/logout", async (c) => {
     await destroySession(c.env, token);
     if (u) await audit(c.env, { userId: u.id, username: u.username, action: "auth.logout", target: u.id });
   }
-  return c.json({ ok: true }, { headers: { "set-cookie": clearCookie(c.env) } });
+  return c.json({ ok: true }, { headers: { "set-cookie": clearCookie(c.env, c.req.url) } });
 });
 
 // ===========================================================================

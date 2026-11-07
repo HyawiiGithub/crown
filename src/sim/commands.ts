@@ -4,7 +4,7 @@ import { SimEngine, setSpeed } from "./engine";
 import { stabilisationPlan } from "./step-economy";
 import { clamp, clamp01, type Rng } from "./rng";
 import { applyPolicy, introduceBill, needsLegislature } from "./step-politics";
-import { annex, declareWar, imposeSanction, liftSanction, signTreaty, transferLand } from "./step-world";
+import { annex, createPuppetState, declareWar, imposeSanction, liftSanction, signTreaty, transferLand, vassalise } from "./step-world";
 import { frontOccupation, peaceAccepted, peaceCost, peaceStanding, type PeaceTerms } from "./occupation";
 
 /**
@@ -233,7 +233,19 @@ export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Reco
       }
 
       const results: string[] = [];
-      if (foe && terms.annexWhole) {
+      // A puppet keeps the beaten state on the map under the victor: land taken below
+      // becomes a client of its own rather than a province of the winner.
+      const takesLand = Boolean(terms.annexWhole || (terms.annexOccupied && standing.mine > 0 && Array.isArray(body.occupiedRing)) || ((terms.drawnShare ?? 0) > 0 && (drawn?.ring?.length ?? 0) >= 3));
+      const wantsPuppet = Boolean(body.puppet) && Boolean(foe) && takesLand;
+      const clientName = String(body.puppetName ?? "").trim() || `${foe?.name ?? enemy} Protectorate`;
+      let carved: Country | null = null;
+      if (wantsPuppet && foe && !terms.annexWhole) carved = createPuppetState(world, c.id, enemy, clientName);
+      const to = carved?.id ?? c.id;
+      if (carved) results.push(`${carved.name} is set up under your protection`);
+      if (foe && terms.annexWhole && wantsPuppet) {
+        const client = vassalise(world, c.id, enemy);
+        results.push(client ? `${foe.name} becomes your puppet` : `${foe.name} stays independent`);
+      } else if (foe && terms.annexWhole) {
         annex(world, c.id, enemy, `${foe.name} is annexed under the peace terms.`);
         results.push(`${foe.name} is annexed`);
       } else if (foe) {
@@ -241,12 +253,12 @@ export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Reco
         const held = front ? frontOccupation(war, front, world.countries) : null;
         const ring = body.occupiedRing as [number, number][] | undefined;
         if (terms.annexOccupied && held && ring && ring.length >= 3) {
-          transferLand(world, held.territory, c.id, held.share, ring, `Annexed from ${world.countries[held.territory]?.name ?? held.territory}`);
-          results.push(`you annex ${(held.share * 100).toFixed(1)}% of ${world.countries[held.territory]?.name}`);
+          transferLand(world, held.territory, to, held.share, ring, carved ? `Granted to ${carved.name}` : `Annexed from ${world.countries[held.territory]?.name ?? held.territory}`);
+          results.push(carved ? `${carved.name} receives ${(held.share * 100).toFixed(1)}% of ${world.countries[held.territory]?.name}` : `you annex ${(held.share * 100).toFixed(1)}% of ${world.countries[held.territory]?.name}`);
         }
         if (drawn && terms.drawnShare) {
-          transferLand(world, enemy, c.id, terms.drawnShare, drawn.ring, `Annexed from ${foe.name}`);
-          results.push(`you take the land you marked, ${(terms.drawnShare * 100).toFixed(1)}% of ${foe.name}`);
+          transferLand(world, enemy, to, terms.drawnShare, drawn.ring, carved ? `Granted to ${carved.name}` : `Annexed from ${foe.name}`);
+          results.push(carved ? `${carved.name} receives the land you marked` : `you take the land you marked, ${(terms.drawnShare * 100).toFixed(1)}% of ${foe.name}`);
         }
       }
       if (foe && terms.cede) {

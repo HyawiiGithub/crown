@@ -46,12 +46,58 @@ interface Drawn {
   path: string;
   centroid: [number, number];
   area: number;
-  /** The largest single landmass: where a name belongs. */
+  /** Polity to use when `control` has no mapping for `key` (historical basemaps). */
+  fallback: string;
+  /** A fallback outline: it fills a gap, so it must not draw a modern border. */
+  soft?: boolean;
+  /** Every polygon's centroid in screen space, so a name can sit on the whole land. */
+  parts: { x: number; y: number; area: number }[];
+  /** The largest single landmass. */
   main: { x: number; y: number; w: number; h: number; area: number };
 }
 
 const WORLD_URL = "/geo/countries-50m.json";
 let rawCache: RawFeature[] | null = null;
+
+/** Scenarios whose map comes from the historical basemap instead of modern borders. */
+const HISTORICAL_SCENARIOS = new Set(["1900", "1914", "1930"]);
+
+/**
+ * Where a polity's name belongs, when its largest polygon is not its heartland.
+ * Without this the Ottoman Empire is labelled in the Arabian desert and the
+ * British Empire in whichever colony happens to be biggest.
+ */
+const LABEL_ANCHORS: Record<string, [number, number]> = {
+  GBR: [-0.13, 51.5], FRA: [2.35, 48.86], DEU: [13.4, 52.52], AUT: [16.37, 48.21],
+  OTT: [33.0, 39.5], TUR: [32.86, 39.93], RUS: [30.3, 59.94], USS: [37.6, 55.75],
+  ESP: [-3.7, 40.42], PRT: [-9.14, 38.72], NLD: [4.9, 52.37], BEL: [4.35, 50.85],
+  ITA: [12.5, 41.9], DNK: [12.57, 55.68], SWE: [18.07, 59.33], NOR: [10.75, 59.91],
+  USA: [-77.04, 38.9], CHN: [116.4, 39.9], JPN: [139.7, 35.7], RAJ: [77.2, 28.6],
+  EGY: [31.2, 30.0], EGP: [31.2, 30.0], MAR: [-6.8, 34.0], ALG: [3.06, 36.75],
+  IRN: [51.4, 35.7], SAU: [46.7, 24.7], ETH: [38.75, 9.0], SUD: [32.5, 15.6],
+  AOF: [-17.45, 14.7], AEF: [15.3, -4.3], NIG: [7.5, 9.0], BWF: [-1.0, 7.0],
+  GWA: [9.7, 4.05], GEA: [39.28, -6.8], EIS: [38.9, 15.3], PAF: [13.2, -8.8],
+  BEA: [36.8, -1.3], RHO: [31.05, -17.8], CPC: [18.4, -33.9], ZAF: [28.2, -25.7],
+  SAR: [28.2, -25.7], OFS: [26.2, -29.1], COD: [15.3, -4.3], MDG: [47.5, -18.9],
+  IDC: [105.8, 21.0], DEI: [106.8, -6.2], KOR: [127.0, 37.5], THA: [100.5, 13.75],
+};
+const historicalCache = new Map<string, RawFeature[] | null>();
+
+async function loadHistorical(id: string): Promise<RawFeature[] | null> {
+  if (!HISTORICAL_SCENARIOS.has(id)) return null;
+  if (historicalCache.has(id)) return historicalCache.get(id) ?? null;
+  try {
+    const res = await fetch(`/geo/historical-${id}.json`);
+    if (!res.ok) throw new Error(String(res.status));
+    const fc = (await res.json()) as { features?: RawFeature[] };
+    const features = fc.features ?? [];
+    historicalCache.set(id, features.length ? features : null);
+    return features.length ? features : null;
+  } catch {
+    historicalCache.set(id, null);
+    return null;
+  }
+}
 
 async function loadFeatures(): Promise<RawFeature[]> {
   if (rawCache) return rawCache;
@@ -73,6 +119,8 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
   const wrapRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 1000, h: 600 });
   const [raw, setRaw] = useState<RawFeature[] | null>(rawCache);
+  const [historical, setHistorical] = useState<RawFeature[] | null>(null);
+  const historicalActive = HISTORICAL_SCENARIOS.has(theme.id);
   const [failed, setFailed] = useState(false);
   const [transform, setTransform] = useState({ k: 1, x: 0, y: 0 });
   const [hover, setHover] = useState<{ x: number; y: number; id: string; place: string } | null>(null);
@@ -99,43 +147,78 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
     };
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+    setHistorical(null);
+    if (!historicalActive) return;
+    loadHistorical(theme.id).then((f) => alive && setHistorical(f));
+    return () => {
+      alive = false;
+    };
+  }, [historicalActive, theme.id]);
+
   // ---- geometry, one projection for everything ----------------------------
   const projection = useMemo(() => geoNaturalEarth1().fitExtent([[6, 6], [size.w - 6, size.h - 6]], { type: "Sphere" } as never), [size.w, size.h]);
   const pathGen = useMemo<GeoPath>(() => geoPath(projection), [projection]);
 
   const drawn = useMemo<Drawn[]>(() => {
-    if (!raw) return [];
+    const source = historical ?? raw;
+    if (!source) return [];
+    const historicalSource = historical !== null;
     const out: Drawn[] = [];
-    for (const f of raw) {
-      const key = featureKey(f);
-      if (key === "010") continue;
+    for (const f of source) {
+      const key = historicalSource ? String(f.properties?.h ?? "") : featureKey(f);
+      if (!historicalSource && key === "010") continue;
+      if (!key) continue;
       const d = pathGen(f as never);
       if (!d) continue;
       const poly = largestPolygon(f, pathGen);
       const shape = (poly ? { type: "Polygon", coordinates: poly } : f) as never;
       const [cx, cy] = pathGen.centroid(shape);
       const [[x0, y0], [x1, y1]] = pathGen.bounds(shape);
-      out.push({ key, numeric: key, name: String(f.properties?.name ?? key), path: d, centroid: pathGen.centroid(f as never) as [number, number], area: pathGen.area(f as never), main: { x: cx, y: cy, w: x1 - x0, h: y1 - y0, area: pathGen.area(shape) } });
+      const name = historicalSource ? String(f.properties?.n ?? key) : String(f.properties?.name ?? key);
+      const fallback = historicalSource ? String(f.properties?.p ?? "") : "";
+      const parts = polygonsOf(f)
+        .map((coords) => {
+          const shapePart = { type: "Polygon", coordinates: coords } as never;
+          const [px, py] = pathGen.centroid(shapePart);
+          return { x: px, y: py, area: pathGen.area(shapePart) };
+        })
+        .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y) && p.area > 0);
+      out.push({ key, numeric: key, name, path: d, centroid: pathGen.centroid(f as never) as [number, number], area: pathGen.area(f as never), fallback, soft: historicalSource && Boolean((f.properties as Record<string, unknown> | undefined)?.f), parts, main: { x: cx, y: cy, w: x1 - x0, h: y1 - y0, area: pathGen.area(shape) } });
     }
     return out;
-  }, [raw, pathGen]);
+  }, [raw, historical, pathGen]);
+
+  // The historical basemap is the only land layer, so anywhere the source draws
+  // nothing used to show the paper through as a hole. Paint every modern land in
+  // its scenario owner's colour underneath: the historical polygons still draw
+  // their own borders on top, and a missing polygon can no longer leave a gap.
+  const base = useMemo(() => {
+    if (!historical || !raw) return [];
+    return raw.map((f) => ({ key: featureKey(f), path: pathGen(f as never) ?? "" })).filter((b) => b.path);
+  }, [historical, raw, pathGen]);
 
   const graticule = useMemo(() => pathGen(geoGraticule10()) ?? "", [pathGen]);
   const sphere = useMemo(() => pathGen({ type: "Sphere" } as never) ?? "", [pathGen]);
 
   const regionPaths = useMemo(
     () =>
-      regions.map((r) => {
+      regions
+        // A historical basemap carries its own borders, so only land handed over
+        // by a peace deal is painted on top of it.
+        .filter((r) => !historical || r.id.startsWith("ceded-"))
+        .map((r) => {
         const pts = r.ring.map((p) => projection(p)).filter(Boolean) as [number, number][];
         return { ...r, d: `M${pts.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join("L")}Z`, cx: pts.reduce((a, p) => a + p[0], 0) / pts.length, cy: pts.reduce((a, p) => a + p[1], 0) / pts.length };
       }),
-    [regions, projection],
+    [regions, projection, historical],
   );
 
   // The hosts of a region are modern ISO3 codes; find their polygons to clip against.
   const hostPaths = useMemo(() => {
-    const byIso = new Map<string, string>();
-    for (const c of drawn) byIso.set(c.key, c.path);
+    const byIso = new Map<string, string[]>();
+    for (const c of drawn) byIso.set(c.key, [...(byIso.get(c.key) ?? []), c.path]);
     return byIso;
   }, [drawn]);
 
@@ -201,18 +284,106 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
     return m;
   }, [countries, layer, scale, theme, atWar, focus]);
 
-  // ---- labels: the biggest polygon of each major polity -------------------
-  const labels = useMemo(() => {
-    const best = new Map<string, Drawn["main"]>();
-    for (const f of drawn) {
-      const id = control[f.key];
-      // Overseas territories do not carry the owner's name: no "Denmark" on Greenland.
-      if (!id || TERRITORY_OWNER[f.key]) continue;
-      const cur = best.get(id);
-      if (!cur || f.main.area > cur.area) best.set(id, f.main);
+  /** Who owns a polygon now. Historical basemaps know their day-one polity, and
+   *  follow `control` afterwards so annexations and peace deals recolour them. */
+  /** Who held each modern land on day one. A historical polygon keeps its own
+   *  polity until the land under it actually changes hands, so modern borders
+   *  never leak into a 1900 map. */
+  const dayOne = useMemo(() => {
+    const claimed = new Map<string, string>();
+    for (const c of Object.values(countries)) for (const land of c.lands ?? []) if (!claimed.has(land)) claimed.set(land, c.id);
+    const owner = (land: string, depth = 0): string | undefined => {
+      const direct = claimed.get(land);
+      if (direct) return direct;
+      if (depth > 3) return undefined;
+      const next = TERRITORY_OWNER[land];
+      return next ? owner(next, depth + 1) : undefined;
+    };
+    const m = new Map<string, string>();
+    for (const iso3 of Object.keys(COUNTRY_BY_ISO3)) {
+      const numeric = COUNTRY_BY_ISO3[iso3]?.numeric;
+      const held = owner(iso3);
+      if (numeric && held) m.set(numeric, held);
     }
-    return [...best.entries()].sort((a, b) => b[1].area - a[1].area).map(([id, main]) => ({ id, ...main }));
-  }, [drawn, control]);
+    return m;
+  }, [countries]);
+
+  /** Who owns a polygon now. Historical basemaps already know their day-one
+   *  polity, so `control` only takes over where the land has changed hands. */
+  const ownerOf = useCallback(
+    (f: Drawn): string => {
+      const now = control[f.key];
+      if (!historical) return now || f.key;
+      // Whose land it is decides the colour, not who the source drew on it: the
+      // historical files carry hundreds of native polities scattered inside the
+      // colonial borders, which turned Africa into confetti of petty states. The
+      // basemap's own polity only fills land the scenario assigns to nobody.
+      return now || f.fallback || "";
+    },
+    [control, historical, dayOne],
+  );
+
+  // ---- labels: the centre of each polity's own land ------------------------
+  const labels = useMemo(() => {
+    const shapes = new Map<string, { x: number; y: number; area: number }[]>();
+    for (const f of drawn) {
+      const id = ownerOf(f);
+      // Overseas territories do not carry the owner's name: no "Denmark" on Greenland.
+      if (!id || (!historical && TERRITORY_OWNER[f.key])) continue;
+      const list = shapes.get(id) ?? [];
+      list.push(...f.parts);
+      shapes.set(id, list);
+    }
+    return [...shapes.entries()]
+      .map(([id, list]) => {
+        // Centre the name on the nation's own land, weighted by area, rather than on
+        // one polygon: an empire's largest polygon can be a colony or a desert. When
+        // a capital is known, stay near it so overseas land cannot drag the name off
+        // the country it belongs to.
+        const anchor = LABEL_ANCHORS[id];
+        const home = anchor ? projection(anchor) : null;
+        // Only the home region counts. A wide radius let Greenland answer for
+        // Copenhagen, so the name fell back to a possession instead of the capital.
+        // A capital anchor should only gather the parts around it: without a radius
+        // French Guiana and Réunion pulled France's name out into the Atlantic (it
+        // landed on Spain), and Greenland answered for Copenhagen.
+        const radius = size.w * 0.12;
+        const near = home ? list.filter((p) => Math.hypot(p.x - home[0], p.y - home[1]) < radius) : [];
+        const pool = near.length ? near : list;
+        // With a capital, centre on the largest landmass near it. Averaging every
+        // part would let a distant island pull the name off the country (Denmark
+        // ended up labelled on Greenland).
+        const total = pool.reduce((a, p) => a + p.area, 0) || 1;
+        // Take the land nearest the capital, not the biggest one in its neighbourhood:
+        // the Ottoman Empire's largest nearby province is the Levant, which put its
+        // name in the Middle East instead of Anatolia. If the source draws no land
+        // near the capital at all (Denmark's peninsula is missing from the 1900 file),
+        // name it at the capital rather than on a distant possession.
+        const dist = (p: { x: number; y: number }) => (home ? Math.hypot(p.x - home[0], p.y - home[1]) : 0);
+        // Ignore specks: a small island can sit closer to the capital than the
+        // mainland and pull the name offshore (the Ottomans landed on Cyprus).
+        const biggest = near.reduce((a, p) => Math.max(a, p.area), 0);
+        const major = near.filter((p) => p.area >= biggest * 0.2);
+        const candidates = major.length ? major : near;
+        const anchorPart = candidates.length ? candidates.reduce((a, p) => (dist(p) < dist(a) ? p : a), candidates[0]) : null;
+        const x = anchorPart ? anchorPart.x : pool.reduce((a, p) => a + p.x * p.area, 0) / total;
+        const y = anchorPart ? anchorPart.y : pool.reduce((a, p) => a + p.y * p.area, 0) / total;
+        const spread = Math.sqrt(total);
+        // Second choice: the polity's biggest landmass, in case the first spot collides
+        // with a neighbour and the label would otherwise be dropped entirely (Russia
+        // lost its name once it was pinned at St Petersburg).
+        const largest = list.reduce<{ x: number; y: number; area: number } | null>((a, p) => (!a || p.area > a.area ? p : a), null);
+        return { id, x, y, altX: largest?.x ?? x, altY: largest?.y ?? y, w: Math.min(180, spread * 1.7), h: Math.min(90, spread), area: total };
+      })
+      // Sovereign states get their names before their colonies do, so an empire
+      // is never crowded off the map by "Anglo-Egyptian Sudan" sitting next to it.
+      .sort((a, b) => {
+        const depA = countries[a.id]?.overlord ? 1 : 0;
+        const depB = countries[b.id]?.overlord ? 1 : 0;
+        if (depA !== depB) return depA - depB;
+        return b.area - a.area;
+      });
+  }, [drawn, ownerOf, historical, projection, countries, size.w]);
 
   // Fit each name inside its land at this zoom, biggest countries first, and never overlap.
   const placedLabels = useMemo(() => {
@@ -226,10 +397,25 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
       if (font < 8) continue;
       const halfW = (font * name.length * 0.56) / 2 / k + 1 / k;
       const halfH = (font * 0.65) / k;
-      const box = { x0: l.x - halfW, y0: l.y - halfH, x1: l.x + halfW, y1: l.y + halfH };
-      if (taken.some((t) => box.x0 < t.x1 && box.x1 > t.x0 && box.y0 < t.y1 && box.y1 > t.y0)) continue;
-      taken.push(box);
-      out.push({ id: l.id, name, x: l.x, y: l.y, font });
+      // A crowded neighbourhood should not cost a country its name: try nudging up
+      // and down at the first spot, then fall back to the largest landmass before
+      // dropping the label entirely.
+      const spots = [
+        { x: l.x, y: l.y },
+        { x: l.altX, y: l.altY },
+      ];
+      let placed = false;
+      for (const spot of spots) {
+        if (placed) break;
+        for (const dy of [0, halfH * 2.6, -halfH * 2.6]) {
+          const box = { x0: spot.x - halfW, y0: spot.y + dy - halfH, x1: spot.x + halfW, y1: spot.y + dy + halfH };
+          if (taken.some((t) => box.x0 < t.x1 && box.x1 > t.x0 && box.y0 < t.y1 && box.y1 > t.y0)) continue;
+          taken.push(box);
+          out.push({ id: l.id, name, x: spot.x, y: spot.y + dy, font });
+          placed = true;
+          break;
+        }
+      }
     }
     return out;
   }, [labels, countries, transform.k]);
@@ -351,8 +537,14 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
         <g transform={`translate(${transform.x} ${transform.y}) scale(${transform.k})`}>
           <path d={sphere} className="map__sphere" />
           <path className="map__graticule" d={graticule} strokeWidth={0.4} />
+          {historical &&
+            base.map((b, i) => {
+              const id = control[b.key];
+              const c = id ? countries[id] : undefined;
+              return <path key={`base-${b.key}-${i}`} d={b.path} fill={c ? fills.get(id) ?? theme.unclaimed : theme.unclaimed} stroke="none" style={{ pointerEvents: "none" }} />;
+            })}
           {drawn.map((f, i) => {
-            const id = control[f.key];
+            const id = ownerOf(f);
             const c = id ? countries[id] : undefined;
             if (!id || !c) return <path key={`${f.key}-${i}`} d={f.path} fill={theme.unclaimed} stroke={theme.stroke} strokeWidth={strokeWidth} opacity={0.5} />;
             return (
@@ -361,7 +553,7 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
                 className="map__country"
                 d={f.path}
                 fill={fills.get(id) ?? theme.unclaimed}
-                stroke={theme.stroke}
+                stroke={f.soft ? "none" : theme.stroke}
                 strokeWidth={strokeWidth}
                 onMouseMove={(e) => track(e, id, f.name)}
                 onMouseLeave={() => setHover(null)}
@@ -371,35 +563,39 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
             );
           })}
 
-          <defs>
-            {regionPaths.map((r) => (
-              <clipPath id={`clip-${r.id}`} key={r.id}>
-                {r.hosts.map((iso) => {
-                  const d = hostPaths.get(numericOf(iso));
-                  return d ? <path key={iso} d={d} /> : null;
-                })}
-              </clipPath>
-            ))}
-          </defs>
-          {regionPaths.map((r) => {
-            const c = countries[r.owner];
-            if (!c) return null;
-            return (
-              <path
-                key={r.id}
-                className="map__country"
-                d={r.d}
-                clipPath={`url(#clip-${r.id})`}
-                fill={fills.get(r.owner) ?? c.mapColor}
-                stroke={theme.stroke}
-                strokeWidth={strokeWidth}
-                onMouseMove={(e) => track(e, r.owner, r.name)}
-                onMouseLeave={() => setHover(null)}
-                onClick={() => pick(r.owner)}
-                style={{ cursor: "pointer" }}
-              />
-            );
-          })}
+          {regionPaths.length > 0 && (
+            <>
+              <defs>
+                {regionPaths.map((r) => (
+                  <clipPath id={`clip-${r.id}`} key={r.id}>
+                    {r.hosts.map((iso) => {
+                      const paths = hostPaths.get(numericOf(iso)) ?? [];
+                      return paths.map((d, i) => <path key={`${iso}-${i}`} d={d} />);
+                    })}
+                  </clipPath>
+                ))}
+              </defs>
+              {regionPaths.map((r) => {
+                const c = countries[r.owner];
+                if (!c) return null;
+                return (
+                  <path
+                    key={r.id}
+                    className="map__country"
+                    d={r.d}
+                    clipPath={`url(#clip-${r.id})`}
+                    fill={fills.get(r.owner) ?? c.mapColor}
+                    stroke={theme.stroke}
+                    strokeWidth={strokeWidth}
+                    onMouseMove={(e) => track(e, r.owner, r.name)}
+                    onMouseLeave={() => setHover(null)}
+                    onClick={() => pick(r.owner)}
+                    style={{ cursor: "pointer" }}
+                  />
+                );
+              })}
+            </>
+          )}
 
           <defs>
             {fronts.map((f) => <clipPath id={`front-${f.key}`} key={f.key}>{f.hosts.map((d, i) => <path key={i} d={d} />)}</clipPath>)}
@@ -428,12 +624,12 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
 
           {/* Outlines for the player's country and the selection, every polygon they own. */}
           {drawn.map((f, i) => {
-            const id = control[f.key];
+            const id = ownerOf(f);
             if (id !== selected && id !== player) return null;
             return <path key={`hl-${f.key}-${i}`} d={f.path} fill="none" stroke={id === selected ? "var(--ink)" : "var(--accent-2)"} strokeWidth={id === selected ? 1.5 : 1.1} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />;
           })}
 
-          {regionPaths.filter((r) => r.owner === selected || r.owner === player).map((r) => (
+          {!historical && regionPaths.filter((r) => r.owner === selected || r.owner === player).map((r) => (
             <path key={`hl-${r.id}`} d={r.d} clipPath={`url(#clip-${r.id})`} fill="none" stroke={r.owner === selected ? "var(--ink)" : "var(--accent-2)"} strokeWidth={r.owner === selected ? 1.5 : 1.1} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
           ))}
 
@@ -519,6 +715,14 @@ interface FrontGeometry {
   /** Sampled positions of the land along the axis, sorted, so a share maps to a distance. */
   depths: number[];
   half: number;
+}
+
+/** Every polygon of a feature, so a name can be centred on the land as a whole. */
+function polygonsOf(f: RawFeature): number[][][][] {
+  const g = f.geometry as { type?: string; coordinates?: unknown } | undefined;
+  if (g?.type === "Polygon") return [g.coordinates as number[][][]];
+  if (g?.type === "MultiPolygon") return g.coordinates as number[][][][];
+  return [];
 }
 
 function largestPolygon(f: RawFeature, gen: GeoPath): number[][][] | null {

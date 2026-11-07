@@ -568,6 +568,95 @@ function Trade({ c, mine }: { c: Country; mine: boolean }) {
   );
 }
 
+function governmentLabel(g: string): string {
+  const names: Record<string, string> = {
+    "absolute-monarchy": "Absolute monarchy",
+    "constitutional-monarchy": "Constitutional monarchy",
+    "parliamentary-republic": "Parliamentary republic",
+    "semi-presidential-republic": "Semi-presidential republic",
+    "presidential-republic": "Presidential republic",
+    "federal-republic": "Federal republic",
+    confederation: "Confederation",
+    "one-party-state": "One-party state",
+    "military-junta": "Military junta",
+    theocracy: "Theocracy",
+    "monarchy-absolute-colonial": "Colonial administration",
+  };
+  return names[g] ?? g.replace(/-/g, " ").replace(/^./, (s) => s.toUpperCase());
+}
+
+function regimeLabel(c: Country): string {
+  if (c.overlord) return `Dependency of ${c.overlord}`;
+  const g = c.government as string;
+  if (["parliamentary-republic", "semi-presidential-republic", "presidential-republic", "federal-republic", "confederation", "constitutional-monarchy"].includes(g)) return "Constitutional government";
+  if (["one-party-state", "military-junta", "theocracy"].includes(g)) return "Authoritarian rule";
+  return "Personal rule";
+}
+
+function ideologyLabel(v: number): string {
+  if (v < -55) return "Hard left";
+  if (v < -20) return "Left";
+  if (v <= 20) return "Centre";
+  if (v <= 55) return "Right";
+  return "Hard right";
+}
+
+/** Mood, grievances and unrest, with the levers a government actually has. */
+function InternalSituation({ c, mine }: { c: Country; mine: boolean }) {
+  const e = c.economy;
+  const active = c.unrest.filter((u) => !u.endedAt).sort((a, b) => b.intensity - a.intensity);
+  const share = (v: number) => Math.max(0, Math.min(1, v));
+  const prices = share(e.monetary.inflation / 0.2);
+  const jobs = share((e.labour.unemployment - e.macro.nairu) / 0.1);
+  const wages = share(-e.labour.wageGrowth / 0.05);
+  const squeeze = Math.round(((prices + jobs + wages) / 3) * 100);
+  return (
+    <div className="stack">
+      <div className="card">
+        <div className="eyebrow" style={{ marginBottom: 6 }}>Internal situation</div>
+        <Stat label="Public mood" value={pct0(c.executive.approval / 100)} tone={c.executive.approval >= 45 ? "pos" : "neg"} />
+        <Stat label="Legitimacy" value={pct0(c.executive.confidence / 100)} tone={c.executive.confidence < 40 ? "neg" : ""} />
+        <Stat label="National cohesion" value={pct0(c.cohesion / 100)} tone={c.cohesion < 40 ? "neg" : ""} hint="Low cohesion is where separatism starts." />
+        <Stat label="Unrest risk" value={pct0(c.unrestRisk)} tone={c.unrestRisk > 0.3 ? "neg" : ""} />
+        <Stat label="Strike risk" value={pct0(e.labour.strikeRisk)} tone={e.labour.strikeRisk > 0.25 ? "neg" : ""} />
+        <Stat label="Cost-of-living squeeze" value={pct0(squeeze / 100)} tone={squeeze > 45 ? "neg" : ""} hint="Prices, jobs and falling real wages, averaged." />
+        {mine && (
+          <div className="row row--wrap" style={{ gap: 4, marginTop: 8 }}>
+            <button className="btn btn--sm btn--primary" title="Meet the demands with more welfare spending. Goes through parliament where there is one." onClick={() => void act({ type: "apply-policy", budget: { welfare: Math.min(0.2, e.budget.welfare + 0.01) } })}>Concede to the protests</button>
+            <button className="btn btn--sm btn--danger" title="Police and troops. Clears the streets and costs legitimacy." onClick={() => void act({ type: "emergency-powers", value: true })}>Crack down</button>
+          </div>
+        )}
+      </div>
+      <Panel title="Grievances">
+        {[
+          { key: "prices", label: "Prices", value: prices, note: `${(e.monetary.inflation * 100).toFixed(1)}% inflation` },
+          { key: "jobs", label: "Jobs", value: jobs, note: `${(e.labour.unemployment * 100).toFixed(1)}% unemployed` },
+          { key: "wages", label: "Real wages", value: wages, note: `${(e.labour.wageGrowth * 100).toFixed(1)}% wage growth` },
+        ].map((g) => (
+          <div key={g.key} style={{ marginBottom: 6 }}>
+            <div className="row" style={{ justifyContent: "space-between", fontSize: 11.5 }}>
+              <span className="dim">{g.label}</span>
+              <span className="mono dim">{g.note}</span>
+            </div>
+            <Bar value={g.value} max={1} tone={g.value > 0.5 ? "var(--negative)" : "var(--positive)"} />
+          </div>
+        ))}
+      </Panel>
+      <Panel title={`Unrest (${active.length})`}>
+        {active.length === 0 && <div className="dim" style={{ fontSize: 12 }}>Nothing organised on the streets right now. Mood is the thing to watch.</div>}
+        {active.map((u) => (
+          <div key={u.id} className="row" style={{ fontSize: 12, padding: "3px 0" }}>
+            <span className="grow" style={{ textTransform: "capitalize" }}>{u.kind.replace(/-/g, " ")}</span>
+            {u.region && <span className="dim truncate" style={{ maxWidth: 90 }}>{u.region}</span>}
+            {u.fatalities > 0 && <span className="dim mono">{u.fatalities} dead</span>}
+            <span className="mono">{Math.round(u.intensity)}</span>
+          </div>
+        ))}
+      </Panel>
+    </div>
+  );
+}
+
 function Politics({ c, mine }: { c: Country; mine: boolean }) {
   const characters = useStore((s) => s.characters);
   const bills = useStore((s) => s.bills);
@@ -578,14 +667,25 @@ function Politics({ c, mine }: { c: Country; mine: boolean }) {
   const govSeats = chamber ? c.parties.filter((p) => ex.coalition.includes(p.id)).reduce((a, p) => a + (p.seats[chamber.id] ?? 0), 0) : 0;
   const countryBills = Object.values(bills).filter((b) => b.country === c.id).sort((a, b) => b.introducedAt - a.introducedAt).slice(0, 8);
   const banker = Object.values(characters).find((x) => x.country === c.id && x.role === "central-banker");
+  const opposition = chamber
+    ? [...c.parties].filter((p) => !ex.coalition.includes(p.id)).sort((a, b) => (b.seats[chamber.id] ?? 0) - (a.seats[chamber.id] ?? 0))[0]
+    : undefined;
+  const openReferendums = (c.referendums ?? []).filter((r) => r.status === "scheduled" || r.status === "open").length;
   return (
     <div className="stack">
       <div className="card">
-        <div className="eyebrow" style={{ marginBottom: 6 }}>Government</div>
+        <div className="eyebrow" style={{ marginBottom: 6 }}>Political system</div>
+        <Stat label="System" value={<span className="ink-text">{governmentLabel(c.government as string)}</span>} />
+        <Stat label="Regime" value={regimeLabel(c)} />
+        <Stat label="Ideology" value={`${ideologyLabel(c.ideology)} (${c.ideology > 0 ? "+" : ""}${c.ideology.toFixed(0)})`} />
         <Stat label={ex.headOfStateTitle} value={<span className="ink-text">{charName(characters, ex.headOfStateId)}</span>} />
         {ex.headOfGovernmentId && ex.headOfGovernmentId !== ex.headOfStateId && <Stat label={ex.headOfGovernmentTitle} value={<span className="ink-text">{charName(characters, ex.headOfGovernmentId)}</span>} />}
         <Stat label="Approval" value={pct0(ex.approval / 100)} tone={ex.approval >= 45 ? "pos" : "neg"} />
-        <Stat label="Stability" value={pct0(ex.confidence / 100)} />
+        <Stat label="Legitimacy" value={pct0(ex.confidence / 100)} />
+        {chamber && <Stat label="Coalition" value={`${govSeats} of ${total} seats`} tone={govSeats > total / 2 ? "pos" : "neg"} />}
+        {chamber && opposition && <Stat label="Largest opposition" value={<span className="truncate">{opposition.name} · {opposition.seats[chamber.id] ?? 0}</span>} />}
+        {c.courts.length > 0 && <Stat label="Judiciary" value={`${c.courts[0].name}${c.courts[0].docket.length ? ` · ${c.courts[0].docket.length} cases` : ""}`} />}
+        {openReferendums > 0 && <Stat label="Referendums" value={`${openReferendums} pending`} />}
         {c.rulingPartyName && <Stat label="Ruling party" value={<span className="ink-text">{c.rulingPartyName}</span>} />}
         {c.nextElectionAt !== undefined && start && <Stat label="Next election" value={simDate(start, c.nextElectionAt)} />}
         {ex.emergencyPowers && <Stat label="State of emergency" value="In force" tone="neg" />}
@@ -643,11 +743,7 @@ function Politics({ c, mine }: { c: Country; mine: boolean }) {
         </Panel>
       )}
 
-      {c.unrest.filter((u) => !u.endedAt).length > 0 && (
-        <Panel title="Unrest">
-          {c.unrest.filter((u) => !u.endedAt).map((u) => <div key={u.id} className="row" style={{ fontSize: 12 }}><span className="grow">{u.kind.replace(/-/g, " ")}</span><span className="mono">{Math.round(u.intensity)}</span></div>)}
-        </Panel>
-      )}
+      <InternalSituation c={c} mine={mine} />
     </div>
   );
 }
@@ -854,6 +950,7 @@ export function PeaceDeal() {
   const [annexWhole, setAnnexWhole] = useState(false);
   const [cede, setCede] = useState(false);
   const [reparations, setReparations] = useState(0);
+  const [puppet, setPuppet] = useState(false);
   const war = wars.find((w) => w.id === warId);
   if (!war || !player || war.endedAt || !war.belligerents[player] || drawing) return null;
 
@@ -872,7 +969,7 @@ export function PeaceDeal() {
 
   const propose = async () => {
     const r = await act({
-      type: "propose-peace", war: war.id, enemy, annexOccupied: terms.annexOccupied, annexWhole: terms.annexWhole, cede: terms.cede, reparations,
+      type: "propose-peace", war: war.id, enemy, annexOccupied: terms.annexOccupied, annexWhole: terms.annexWhole, cede: terms.cede, reparations, puppet,
       occupiedRing: standing.mineFront >= 0 ? frontRing(war.id, standing.mineFront) : undefined,
       cededRing: standing.theirsFront >= 0 ? frontRing(war.id, standing.theirsFront) : undefined,
       drawn: usableDrawn ? { ring: usableDrawn.ring, share: usableDrawn.share } : undefined,
@@ -899,6 +996,14 @@ export function PeaceDeal() {
           <div className="eyebrow" style={{ margin: "12px 0 6px" }}>Land</div>
           {foe && <label className="check"><input type="checkbox" disabled={standing.mine <= 0} checked={terms.annexOccupied} onChange={(e) => setAnnexOccupied(e.target.checked)} /> Annex occupied territories ({(standing.mine * 100).toFixed(1)}%)</label>}
           {foe && <label className="check"><input type="checkbox" disabled={standing.mine < 0.8} checked={terms.annexWhole} onChange={(e) => setAnnexWhole(e.target.checked)} /> Annex all of {foeName}{standing.mine < 0.8 ? " (needs 80% held)" : ""}</label>}
+          {foe && (terms.annexOccupied || terms.annexWhole || terms.drawnShare > 0) && (
+            <label className="check"><input type="checkbox" checked={puppet} onChange={(e) => setPuppet(e.target.checked)} /> Set up a puppet state from this land</label>
+          )}
+          {foe && puppet && (terms.annexOccupied || terms.annexWhole || terms.drawnShare > 0) && (
+            <div className="dim" style={{ fontSize: 11, paddingLeft: 20 }}>
+              {terms.annexWhole ? `${foeName} stays on the map under your protection.` : `The land you take becomes ${foeName} Protectorate, ruled from your capital in all but name.`}
+            </div>
+          )}
           {foe && (
             <div className="row row--wrap" style={{ gap: 6, margin: "6px 0" }}>
               <button className="btn btn--sm" onClick={() => set({ peaceDrawing: enemy })}>{usableDrawn ? "Redraw land" : "Draw land on the map"}</button>
