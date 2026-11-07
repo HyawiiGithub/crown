@@ -811,25 +811,9 @@ async function build(year: Year): Promise<void> {
   const modernFeatures = (feature(modernRaw, modernRaw.objects.countries as never) as unknown as { features: Feature[] }).features;
   const outlined: string[] = [];
 
-  // A polity the source draws nowhere at all (Cuba in 1900, Aden, Muscat) would be
-  // invisible, so give its lands a modern outline as well.
-  const drawnPolities = new Set(out.features.map((f) => String((f as Feature).properties?.p ?? "")));
-  for (const polity of scenario.polities) {
-    if (drawnPolities.has(polity.id)) continue;
-    for (const land of polity.lands) {
-      const def = COUNTRY_BY_ISO3[land];
-      if (!def) continue;
-      const m = modernFeatures.find((x) => String((x as unknown as { id?: string | number }).id).padStart(3, "0") === def.numeric);
-      if (!m?.geometry) continue;
-      out.features.push({
-        type: "Feature",
-        id: def.numeric,
-        properties: { n: def.name, p: polity.id, h: def.numeric, f: 1 },
-        geometry: { type: m.geometry.type, coordinates: roundCoords(m.geometry.coordinates) },
-      });
-      outlined.push(`${land}:${polity.id}`);
-    }
-  }
+  // Polities the source draws nowhere (Cuba, Aden, Muscat) are left to the base
+  // layer, which paints their land in their colour without drawing a border. Any
+  // modern outline here would be drawn on top of its neighbours' historical land.
 
   // Largest features first keeps labels sensible and drawing order stable.
   out.features.sort((a, b) => area(b as Feature) - area(a as Feature));
