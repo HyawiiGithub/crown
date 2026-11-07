@@ -736,6 +736,37 @@ async function build(year: Year): Promise<void> {
   }
   const known = new Set(scenario.polities.map((p) => p.id));
 
+  const modernRaw = JSON.parse(readFileSync(join(process.cwd(), "public", "geo", "countries-50m.json"), "utf8"));
+  const modernFeatures = (feature(modernRaw, modernRaw.objects.countries as never) as unknown as { features: Feature[] }).features;
+  const modernBoxes = new Map<Feature, Box>(modernFeatures.map((m) => [m, bboxOf(m.geometry)]));
+  // The land a shape actually sits on. Nearest-capital guessing keyed the Ottoman
+  // Empire and the Union of South Africa to neighbours, which then looked unowned.
+  const landAt = (pt: [number, number]): string => {
+    for (const m of modernFeatures) {
+      const box = modernBoxes.get(m);
+      if (!m.geometry || !box) continue;
+      if (pt[0] < box[0] || pt[0] > box[2] || pt[1] < box[1] || pt[1] > box[3]) continue;
+      if (!pointInGeometry(m.geometry, pt)) continue;
+      const numeric = String((m as unknown as { id?: unknown }).id ?? "").padStart(3, "0");
+      return COUNTRY_BY_NUMERIC[numeric]?.iso3 ?? "";
+    }
+    return "";
+  };
+  // Shapes span parts that sit far apart, and a part's centre can be offshore, so
+  // take the first part whose bounding centre is actually on land.
+  const landOf = (f: Feature): string => {
+    const centre = landAt(centroid(f));
+    if (centre) return centre;
+    const g = f.geometry as { type?: string; coordinates?: unknown } | null;
+    const parts = !g?.coordinates ? [] : g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? (g.coordinates as unknown[]) : [];
+    for (const part of parts) {
+      const box = bboxOf({ type: g!.type, coordinates: part } as Feature["geometry"]);
+      if (!Number.isFinite(box[0])) continue;
+      const hit = landAt([(box[0] + box[2]) / 2, (box[1] + box[3]) / 2]);
+      if (hit) return hit;
+    }
+    return "";
+  };
   const raw = await loadRaw(year);
   const out: { type: "FeatureCollection"; features: unknown[] } = { type: "FeatureCollection", features: [] };
   const used = new Map<string, number>();
@@ -766,7 +797,10 @@ async function build(year: Year): Promise<void> {
 
     // The host key is a modern land controlled by the polity on day one. After
     // an annexation or a peace deal the map asks `control` for this key.
-    let host = HOST_OVERRIDES[year][key] ?? "";
+    let host = HOST_OVERRIDES[year][key] || landOf(f);
+    // Never key a shape to land its own polity does not hold, or a big polygon
+    // ends up painted in a neighbour's colour.
+    if (host && polity && landToPolity.get(host) !== polity) host = "";
     if (!host && polity) {
       const lands = (polityLands.get(polity) ?? []).filter((l) => COUNTRY_BY_ISO3[l]);
       if (lands.length) {
@@ -803,17 +837,62 @@ async function build(year: Year): Promise<void> {
     });
   }
 
-  // Holes are filled at render time: the map paints the modern land underneath in
-  // the scenario owner's colour. Adding whole modern countries here instead drew
-  // today's borders straight across the historical ones, which is why Africa's
-  // states looked like they were running through each other.
-  const modernRaw = JSON.parse(readFileSync(join(process.cwd(), "public", "geo", "countries-50m.json"), "utf8"));
-  const modernFeatures = (feature(modernRaw, modernRaw.objects.countries as never) as unknown as { features: Feature[] }).features;
   const outlined: string[] = [];
 
-  // Polities the source draws nowhere (Cuba, Aden, Muscat) are left to the base
-  // layer, which paints their land in their colour without drawing a border. Any
-  // modern outline here would be drawn on top of its neighbours' historical land.
+  // The source leaves whole regions blank. In 1900 it draws tribal polities across
+  // the Congo basin but nothing at all for Nigeria, Sudan, Kenya, Tanganyika, the
+  // Rhodesias or Bechuanaland, so those lands had no shape and Africa read as
+  // modern states with historical borders running through each other.
+  //
+  // Where a modern land has no historical shape over its centre, today's outline is
+  // the right shape anyway: the colonial borders of 1900-1930 are very largely the
+  // ones still on the map. Anything the source drew inside such a land is dropped
+  // first, so the two never draw competing borders through each other.
+  const shapes = out.features as { type?: string; properties: { n: string; p: string; h: string }; geometry: Feature["geometry"] }[];
+  const ownerKey = (s: (typeof shapes)[number]) => landToPolity.get(COUNTRY_BY_NUMERIC[s.properties.h]?.iso3 ?? "") ?? s.properties.p;
+  const fillFor = new Map<string, (typeof shapes)[number]>();
+  const fillCentres = new Map<string, [number, number]>();
+  for (let pass = 0; pass < 2; pass += 1) {
+    for (const m of modernFeatures) {
+      if (!m.geometry) continue;
+      const numeric = String((m as unknown as { id?: unknown }).id ?? "").padStart(3, "0");
+      if (fillFor.has(numeric)) continue;
+      const record = COUNTRY_BY_NUMERIC[numeric];
+      const polity = record ? landToPolity.get(record.iso3) ?? "" : "";
+      if (!polity) continue;
+      const pt = centroid(m);
+      // Already drawn by the land's own polity? Then leave the historical shape be.
+      if (shapes.some((s) => ownerKey(s) === polity && pointInGeometry(s.geometry, pt))) continue;
+      fillFor.set(numeric, {
+        type: "Feature",
+        properties: { n: record.name, p: polity, h: numeric },
+        geometry: { type: m.geometry.type, coordinates: roundCoords(m.geometry.coordinates) },
+      });
+      fillCentres.set(numeric, pt);
+    }
+    const added = [...fillFor.values()].filter((f) => !shapes.includes(f));
+    if (!added.length) break;
+    // A land drawn by the wrong polity leaves that shape overlapping the new one.
+    for (let i = shapes.length - 1; i >= 0; i -= 1) {
+      const shape = shapes[i];
+      const own = ownerKey(shape);
+      const centre = centroid(shape as Feature);
+      // Drop a shape the new outline has replaced, and one that reaches over land
+      // belonging to another polity: French West Africa spanned Chad and Gambia.
+      const stale = added.some((f) => {
+        const at = fillCentres.get(f.properties.h);
+        if (!at) return false;
+        return pointInGeometry(f.geometry, centre) || (f.properties.p !== own && pointInGeometry(shape.geometry, at));
+      });
+      if (stale) shapes.splice(i, 1);
+    }
+  }
+  const fills = [...fillFor.values()];
+  for (const f of fills) {
+    shapes.push(f);
+    used.set(f.properties.p, (used.get(f.properties.p) ?? 0) + 1);
+  }
+  const fillLabels = fills.map((f) => `${f.properties.p}: ${f.properties.n}`);
 
   // Largest features first keeps labels sensible and drawing order stable.
   out.features.sort((a, b) => area(b as Feature) - area(a as Feature));
@@ -822,6 +901,7 @@ async function build(year: Year): Promise<void> {
   const missing = [...known].filter((id) => !used.has(id));
   console.log(`${year}: ${out.features.length} polygons -> historical-${year}.json`);
   if (unmapped.length) console.log(`  unmapped (${unmapped.length}): ${[...new Set(unmapped)].sort().join(", ")}`);
+  if (fillLabels.length) console.log(`  filled from modern outlines (${fillLabels.length}): ${fillLabels.sort().join(", ")}`);
   if (outlined.length) console.log(`  outlined polities with no polygon (${outlined.length}): ${outlined.sort().join(", ")}`);
   if (missing.length) console.log(`  polities with no polygon (${missing.length}): ${missing.sort().join(", ")}`);
 }
