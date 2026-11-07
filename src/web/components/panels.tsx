@@ -950,6 +950,7 @@ export function PeaceDeal() {
   const [annexWhole, setAnnexWhole] = useState(false);
   const [cede, setCede] = useState(false);
   const [reparations, setReparations] = useState(0);
+  const [puppet, setPuppet] = useState(false);
   const war = wars.find((w) => w.id === warId);
   if (!war || !player || war.endedAt || !war.belligerents[player] || drawing) return null;
 
@@ -968,7 +969,7 @@ export function PeaceDeal() {
 
   const propose = async () => {
     const r = await act({
-      type: "propose-peace", war: war.id, enemy, annexOccupied: terms.annexOccupied, annexWhole: terms.annexWhole, cede: terms.cede, reparations,
+      type: "propose-peace", war: war.id, enemy, annexOccupied: terms.annexOccupied, annexWhole: terms.annexWhole, cede: terms.cede, reparations, puppet,
       occupiedRing: standing.mineFront >= 0 ? frontRing(war.id, standing.mineFront) : undefined,
       cededRing: standing.theirsFront >= 0 ? frontRing(war.id, standing.theirsFront) : undefined,
       drawn: usableDrawn ? { ring: usableDrawn.ring, share: usableDrawn.share } : undefined,
@@ -995,6 +996,14 @@ export function PeaceDeal() {
           <div className="eyebrow" style={{ margin: "12px 0 6px" }}>Land</div>
           {foe && <label className="check"><input type="checkbox" disabled={standing.mine <= 0} checked={terms.annexOccupied} onChange={(e) => setAnnexOccupied(e.target.checked)} /> Annex occupied territories ({(standing.mine * 100).toFixed(1)}%)</label>}
           {foe && <label className="check"><input type="checkbox" disabled={standing.mine < 0.8} checked={terms.annexWhole} onChange={(e) => setAnnexWhole(e.target.checked)} /> Annex all of {foeName}{standing.mine < 0.8 ? " (needs 80% held)" : ""}</label>}
+          {foe && (terms.annexOccupied || terms.annexWhole || terms.drawnShare > 0) && (
+            <label className="check"><input type="checkbox" checked={puppet} onChange={(e) => setPuppet(e.target.checked)} /> Set up a puppet state from this land</label>
+          )}
+          {foe && puppet && (terms.annexOccupied || terms.annexWhole || terms.drawnShare > 0) && (
+            <div className="dim" style={{ fontSize: 11, paddingLeft: 20 }}>
+              {terms.annexWhole ? `${foeName} stays on the map under your protection.` : `The land you take becomes ${foeName} Protectorate, ruled from your capital in all but name.`}
+            </div>
+          )}
           {foe && (
             <div className="row row--wrap" style={{ gap: 6, margin: "6px 0" }}>
               <button className="btn btn--sm" onClick={() => set({ peaceDrawing: enemy })}>{usableDrawn ? "Redraw land" : "Draw land on the map"}</button>

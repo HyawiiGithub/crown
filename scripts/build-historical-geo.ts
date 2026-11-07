@@ -849,7 +849,10 @@ async function build(year: Year): Promise<void> {
   // ones still on the map. Anything the source drew inside such a land is dropped
   // first, so the two never draw competing borders through each other.
   const shapes = out.features as { type?: string; properties: { n: string; p: string; h: string }; geometry: Feature["geometry"] }[];
-  const ownerKey = (s: (typeof shapes)[number]) => landToPolity.get(COUNTRY_BY_NUMERIC[s.properties.h]?.iso3 ?? "") ?? s.properties.p;
+  // What a shape draws for, which is the polity the alias table gave it. Reading it
+  // back from the host land split one empire into a fill per modern country, so the
+  // Ottomans came out as Turkey, Syria, Iraq and Palestine with borders between them.
+  const ownerKey = (s: (typeof shapes)[number]) => s.properties.p || landToPolity.get(COUNTRY_BY_NUMERIC[s.properties.h]?.iso3 ?? "") || "";
   const fillFor = new Map<string, (typeof shapes)[number]>();
   const fillCentres = new Map<string, [number, number]>();
   for (let pass = 0; pass < 2; pass += 1) {
@@ -884,9 +887,17 @@ async function build(year: Year): Promise<void> {
       const centre = centroid(shape as Feature);
       // Drop a shape the new outline has replaced, and one that reaches over land
       // belonging to another polity: French West Africa spanned Chad and Gambia.
+      const sBox = bboxOf(shape.geometry);
       const stale = added.some((f) => {
         const at = fillCentres.get(f.properties.h);
         if (!at) return false;
+        const fBox = bboxOf(f.geometry);
+        // Only a shape that fits inside the new land is a leftover of it. An empire
+        // whose centre happens to fall in a filled land is not: the Ottomans' centre
+        // sits in Egypt, and dropping them there replaced the whole empire with one
+        // outline per modern country.
+        const fits = sBox[2] - sBox[0] <= (fBox[2] - fBox[0]) * 1.05 && sBox[3] - sBox[1] <= (fBox[3] - fBox[1]) * 1.05;
+        if (!fits) return false;
         return pointInGeometry(f.geometry, centre) || (f.properties.p !== own && pointInGeometry(shape.geometry, at));
       });
       if (stale) shapes.splice(i, 1);

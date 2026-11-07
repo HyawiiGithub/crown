@@ -1,5 +1,5 @@
 import type { Country, Sanction, Treaty, War, World } from "../shared/types";
-import { pushEvent } from "./bootstrap";
+import { pushEvent, spawnPolity } from "./bootstrap";
 import { frontOccupation } from "./occupation";
 import { LAND_BORDERS } from "../data/borders";
 import { Rng, approach, clamp, clamp01 } from "./rng";
@@ -291,6 +291,35 @@ function navalPower(c: Country | undefined): number {
 }
 
 /** Hand over part of a country: the ground on the map, its people and its output. */
+/** A puppet carved from land taken in a peace deal: a state of its own that answers to the victor. */
+export function createPuppetState(world: World, overlord: string, template: string, name: string): Country | null {
+  const o = world.countries[overlord];
+  if (!o) return null;
+  let id = template + "P";
+  for (let n = 2; world.countries[id] || world.customCountries[id]; n += 1) id = template + "P" + n;
+  const made = spawnPolity(world, id, name);
+  const country = made.country;
+  tieToOverlord(country, o);
+  world.countries[id] = country;
+  world.customCountries[id] = country;
+  for (const ch of made.characters) world.characters[ch.id] = ch;
+  for (const p of country.parties) world.parties[p.id] = p;
+  return country;
+}
+/** A beaten enemy kept on the map as a satellite instead of being annexed. */
+export function vassalise(world: World, overlord: string, target: string): Country | null {
+  const o = world.countries[overlord];
+  const t = world.countries[target];
+  if (!o || !t || t.annexedBy || t.overlord) return null;
+  tieToOverlord(t, o);
+  return t;
+}
+function tieToOverlord(state: Country, overlord: Country): void {
+  state.overlord = overlord.id;
+  state.mapColor = overlord.mapColor;
+  state.bloc = overlord.bloc;
+  overlord.dependencies[state.id] = "protectorate";
+}
 export function transferLand(world: World, from: string, to: string, share: number, ring: [number, number][], name: string): void {
   const a = world.countries[from];
   const b = world.countries[to];
