@@ -317,15 +317,20 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
       const id = ownerOf(f);
       // Overseas territories do not carry the owner's name: no "Denmark" on Greenland.
       if (!id || (!historical && TERRITORY_OWNER[f.key])) continue;
-      const anchor = LABEL_ANCHORS[id];
-      const home = anchor ? projection(anchor) : null;
-      const radius = Math.max(70, size.w * 0.16);
-      const onHome = !home || Math.hypot(f.main.x - home[0], f.main.y - home[1]) < radius;
       const cur = best.get(id);
-      if (!cur || (onHome && !cur.onHome) || (onHome === cur.onHome && f.main.area > cur.main.area)) best.set(id, { main: f.main, onHome });
+      if (!cur || f.main.area > cur.main.area) best.set(id, { main: f.main, onHome: true });
     }
-    return [...best.entries()].map(([id, v]) => ({ id, ...v.main })).sort((a, b) => b.area - a.area);
-  }, [drawn, ownerOf, historical, projection, size.w]);
+    // A polity with a known capital is labelled there: its largest polygon can be a
+    // colony or a desert, which is why Denmark landed on Greenland and the Ottoman
+    // Empire in Arabia. Everything else keeps its biggest landmass.
+    return [...best.entries()]
+      .map(([id, v]) => {
+        const anchor = LABEL_ANCHORS[id];
+        const home = anchor ? projection(anchor) : null;
+        return home ? { id, x: home[0], y: home[1], w: 140, h: 70, area: v.main.area } : { id, ...v.main };
+      })
+      .sort((a, b) => b.area - a.area);
+  }, [drawn, ownerOf, historical, projection]);
 
   // Fit each name inside its land at this zoom, biggest countries first, and never overlap.
   const placedLabels = useMemo(() => {
