@@ -338,7 +338,7 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
         const depA = countries[a.id]?.overlord ? 1 : 0;
         const depB = countries[b.id]?.overlord ? 1 : 0;
         if (depA !== depB) return depA - depB;
-        return (countries[b.id]?.economy.gdp ?? 0) - (countries[a.id]?.economy.gdp ?? 0);
+        return b.area - a.area;
       });
   }, [drawn, ownerOf, historical, projection, countries]);
 
