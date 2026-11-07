@@ -803,65 +803,13 @@ async function build(year: Year): Promise<void> {
     });
   }
 
-  // ---- Coverage: draw the lands the historical source leaves out -----------
-  // The 1900 file has no Kamerun, Togo, German South-West Africa, Sudan, Eritrea
-  // or Italian Somaliland, and no Cuba of its own. A missing polygon is a blank
-  // hole on the map, so any modern land the source does not cover gets a
-  // fallback outline owned by whoever holds that land in this scenario.
-  const outlines = out.features
-    .filter((f) => (f as Feature).geometry)
-    .map((f) => ({ geometry: (f as Feature).geometry!, box: bboxOf((f as Feature).geometry!), p: String((f as Feature).properties?.p ?? "") }));
-  const ownerOfLand = (land: string, depth = 0): string | undefined => {
-    const direct = landToPolity.get(land);
-    if (direct) return direct;
-    if (depth > 3) return undefined;
-    const next = TERRITORY_OWNER[land];
-    return next ? ownerOfLand(next, depth + 1) : undefined;
-  };
+  // Holes are filled at render time: the map paints the modern land underneath in
+  // the scenario owner's colour. Adding whole modern countries here instead drew
+  // today's borders straight across the historical ones, which is why Africa's
+  // states looked like they were running through each other.
   const modernRaw = JSON.parse(readFileSync(join(process.cwd(), "public", "geo", "countries-50m.json"), "utf8"));
   const modernFeatures = (feature(modernRaw, modernRaw.objects.countries as never) as unknown as { features: Feature[] }).features;
-  const filled: string[] = [];
-  for (const m of modernFeatures) {
-    const id = (m as unknown as { id?: string | number }).id;
-    const numeric = id === undefined || id === null ? "" : String(id).padStart(3, "0");
-    const iso3 = numeric ? COUNTRY_BY_NUMERIC[numeric]?.iso3 : undefined;
-    if (!iso3 || !m.geometry) continue;
-    const box = bboxOf(m.geometry);
-    // Sample a grid inside the modern outline: a handful of points is enough to
-    // tell a real gap from a coastline that simply differs by a few kilometres.
-    const pts: [number, number][] = [];
-    for (let x = 0; x < 6; x++) {
-      for (let y = 0; y < 6; y++) {
-        const pt: [number, number] = [box[0] + ((box[2] - box[0]) * (x + 0.5)) / 6, box[1] + ((box[3] - box[1]) * (y + 0.5)) / 6];
-        if (pointInGeometry(m.geometry, pt)) pts.push(pt);
-      }
-    }
-    if (!pts.length) continue;
-    const owner = ownerOfLand(iso3);
-    if (!owner || !known.has(owner)) continue;
-    let covered = 0;
-    for (const pt of pts) {
-      if (outlines.some((o) => pt[0] >= o.box[0] && pt[0] <= o.box[2] && pt[1] >= o.box[1] && pt[1] <= o.box[3] && pointInGeometry(o.geometry, pt))) covered++;
-    }
-    // Fill whenever the source leaves a visible hole, not only when it leaves most
-    // of the land blank: a half-drawn colony still showed empty spaces. Europe is
-    // exempt: there the source is dense, so a surviving hole means a border that
-    // really moved (Alsace, Schleswig, East Prussia) and a modern outline would
-    // paint today's frontier over it. Everywhere else the outline sits underneath
-    // the historical polygons, which are smaller and keep painting over it.
-    if (COUNTRY_BY_ISO3[iso3]?.continent === "Europe") continue;
-    if (covered / pts.length >= 0.9) continue;
-    out.features.push({
-      type: "Feature",
-      // The map keys ownership off `id` first, then the name. A fallback outline
-      // without the id falls back to its name, misses `control`, and paints as
-      // unclaimed, which is why these lands showed as blank cream.
-      id: numeric,
-      properties: { n: COUNTRY_BY_ISO3[iso3]?.name ?? iso3, p: owner, h: numeric },
-      geometry: { type: m.geometry.type, coordinates: roundCoords(m.geometry.coordinates) },
-    });
-    filled.push(`${iso3}:${owner}`);
-  }
+  const outlined: string[] = [];
 
   // A polity the source draws nowhere at all (Cuba in 1900, Aden, Muscat) would be
   // invisible, so give its lands a modern outline as well.
@@ -876,10 +824,10 @@ async function build(year: Year): Promise<void> {
       out.features.push({
         type: "Feature",
         id: def.numeric,
-        properties: { n: def.name, p: polity.id, h: def.numeric },
+        properties: { n: def.name, p: polity.id, h: def.numeric, f: 1 },
         geometry: { type: m.geometry.type, coordinates: roundCoords(m.geometry.coordinates) },
       });
-      filled.push(`${land}:${polity.id}`);
+      outlined.push(`${land}:${polity.id}`);
     }
   }
 
@@ -890,7 +838,7 @@ async function build(year: Year): Promise<void> {
   const missing = [...known].filter((id) => !used.has(id));
   console.log(`${year}: ${out.features.length} polygons -> historical-${year}.json`);
   if (unmapped.length) console.log(`  unmapped (${unmapped.length}): ${[...new Set(unmapped)].sort().join(", ")}`);
-  if (filled.length) console.log(`  filled from modern outlines (${filled.length}): ${filled.sort().join(", ")}`);
+  if (outlined.length) console.log(`  outlined polities with no polygon (${outlined.length}): ${outlined.sort().join(", ")}`);
   if (missing.length) console.log(`  polities with no polygon (${missing.length}): ${missing.sort().join(", ")}`);
 }
 
