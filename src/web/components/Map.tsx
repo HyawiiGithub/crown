@@ -48,6 +48,8 @@ interface Drawn {
   area: number;
   /** Polity to use when `control` has no mapping for `key` (historical basemaps). */
   fallback: string;
+  /** A fallback outline: it fills a gap, so it must not draw a modern border. */
+  soft?: boolean;
   /** Every polygon's centroid in screen space, so a name can sit on the whole land. */
   parts: { x: number; y: number; area: number }[];
   /** The largest single landmass. */
@@ -183,7 +185,7 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
           return { x: px, y: py, area: pathGen.area(shapePart) };
         })
         .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y) && p.area > 0);
-      out.push({ key, numeric: key, name, path: d, centroid: pathGen.centroid(f as never) as [number, number], area: pathGen.area(f as never), fallback, parts, main: { x: cx, y: cy, w: x1 - x0, h: y1 - y0, area: pathGen.area(shape) } });
+      out.push({ key, numeric: key, name, path: d, centroid: pathGen.centroid(f as never) as [number, number], area: pathGen.area(f as never), fallback, soft: historicalSource && Boolean((f.properties as Record<string, unknown> | undefined)?.f), parts, main: { x: cx, y: cy, w: x1 - x0, h: y1 - y0, area: pathGen.area(shape) } });
     }
     return out;
   }, [raw, historical, pathGen]);
@@ -515,7 +517,7 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
                 className="map__country"
                 d={f.path}
                 fill={fills.get(id) ?? theme.unclaimed}
-                stroke={theme.stroke}
+                stroke={f.soft ? "none" : theme.stroke}
                 strokeWidth={strokeWidth}
                 onMouseMove={(e) => track(e, id, f.name)}
                 onMouseLeave={() => setHover(null)}
