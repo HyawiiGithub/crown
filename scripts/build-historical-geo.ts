@@ -14,7 +14,8 @@ import { writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { geoArea, geoCentroid } from "d3-geo";
 import { HISTORY } from "../src/data/history";
-import { COUNTRY_BY_ISO3 } from "../src/data/countries";
+import { feature } from "topojson-client";
+import { COUNTRY_BY_ISO3, COUNTRY_BY_NUMERIC, TERRITORY_OWNER } from "../src/data/countries";
 
 const OUT = join(process.cwd(), "public", "geo");
 const CACHE = join(process.cwd(), ".cache", "historical-basemaps");
@@ -189,7 +190,12 @@ const ALIASES: Record<Year, Record<string, string>> = {
     philippines: "UOT",
     "puerto rico": "UOT",
     cuba: "CUB",
-    kuba: "CUB",
+    // "Kuba" is the Kuba kingdom in the Kasai basin, not Cuba. Mapping it to CUB
+    // painted a Congo polygon in Cuban colours and left Cuba itself blank.
+    kuba: "COD",
+    lagos: "NIG",
+    cotonou: "AOF",
+    "futa jalon": "AOF",
     haiti: "HTI",
     "dominican republic": "DOM",
     mexico: "MEX",
@@ -627,6 +633,49 @@ const HOST_OVERRIDES: Record<Year, Record<string, string>> = {
   },
 };
 
+type Box = [number, number, number, number];
+
+function bboxOf(geometry: Feature["geometry"]): Box {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const visit = (coords: unknown): void => {
+    if (!Array.isArray(coords)) return;
+    if (typeof coords[0] === "number" && typeof coords[1] === "number") {
+      const [x, y] = coords as [number, number];
+      if (x < x0) x0 = x;
+      if (y < y0) y0 = y;
+      if (x > x1) x1 = x;
+      if (y > y1) y1 = y;
+      return;
+    }
+    for (const c of coords) visit(c);
+  };
+  visit(geometry?.coordinates);
+  return Number.isFinite(x0) ? [x0, y0, x1, y1] : [0, 0, 0, 0];
+}
+
+function pointInRing(pt: [number, number], ring: [number, number][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if (yi > pt[1] !== yj > pt[1] && pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** Even-odd test in lon/lat, so it does not depend on ring winding. */
+function pointInGeometry(geometry: Feature["geometry"], pt: [number, number]): boolean {
+  const g = geometry as { type?: string; coordinates?: unknown } | null;
+  if (!g || !g.coordinates) return false;
+  const polys = g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? (g.coordinates as unknown[]) : [];
+  for (const poly of polys) {
+    const rings = poly as [number, number][][];
+    if (!rings.length || !pointInRing(pt, rings[0])) continue;
+    if (!rings.slice(1).some((hole) => pointInRing(pt, hole))) return true;
+  }
+  return false;
+}
+
 function norm(name: string): string {
   return name
     .toLowerCase()
@@ -754,6 +803,79 @@ async function build(year: Year): Promise<void> {
     });
   }
 
+  // ---- Coverage: draw the lands the historical source leaves out -----------
+  // The 1900 file has no Kamerun, Togo, German South-West Africa, Sudan, Eritrea
+  // or Italian Somaliland, and no Cuba of its own. A missing polygon is a blank
+  // hole on the map, so any modern land the source does not cover gets a
+  // fallback outline owned by whoever holds that land in this scenario.
+  const outlines = out.features
+    .filter((f) => (f as Feature).geometry)
+    .map((f) => ({ geometry: (f as Feature).geometry!, box: bboxOf((f as Feature).geometry!) }));
+  const insideSomePolygon = (pt: [number, number]) =>
+    outlines.some(({ geometry, box }) => pt[0] >= box[0] && pt[0] <= box[2] && pt[1] >= box[1] && pt[1] <= box[3] && pointInGeometry(geometry, pt));
+  const ownerOfLand = (land: string, depth = 0): string | undefined => {
+    const direct = landToPolity.get(land);
+    if (direct) return direct;
+    if (depth > 3) return undefined;
+    const next = TERRITORY_OWNER[land];
+    return next ? ownerOfLand(next, depth + 1) : undefined;
+  };
+  const modernRaw = JSON.parse(readFileSync(join(process.cwd(), "public", "geo", "countries-50m.json"), "utf8"));
+  const modernFeatures = (feature(modernRaw, modernRaw.objects.countries as never) as unknown as { features: Feature[] }).features;
+  const filled: string[] = [];
+  for (const m of modernFeatures) {
+    const id = (m as unknown as { id?: string | number }).id;
+    const numeric = id === undefined || id === null ? "" : String(id).padStart(3, "0");
+    const iso3 = numeric ? COUNTRY_BY_NUMERIC[numeric]?.iso3 : undefined;
+    if (!iso3 || !m.geometry) continue;
+    const box = bboxOf(m.geometry);
+    let inside = 0;
+    let covered = 0;
+    // Sample a grid inside the modern outline: a handful of points is enough to
+    // tell a real gap from a coastline that simply differs by a few kilometres.
+    for (let x = 0; x < 6; x++) {
+      for (let y = 0; y < 6; y++) {
+        const pt: [number, number] = [box[0] + ((box[2] - box[0]) * (x + 0.5)) / 6, box[1] + ((box[3] - box[1]) * (y + 0.5)) / 6];
+        if (!pointInGeometry(m.geometry, pt)) continue;
+        inside++;
+        if (insideSomePolygon(pt)) covered++;
+      }
+    }
+    if (inside === 0 || covered / inside >= 0.5) continue;
+    const owner = ownerOfLand(iso3);
+    if (!owner || !known.has(owner)) continue;
+    out.features.push({
+      type: "Feature",
+      // The map keys ownership off `id` first, then the name. A fallback outline
+      // without the id falls back to its name, misses `control`, and paints as
+      // unclaimed, which is why these lands showed as blank cream.
+      id: numeric,
+      properties: { n: COUNTRY_BY_ISO3[iso3]?.name ?? iso3, p: owner, h: numeric },
+      geometry: { type: m.geometry.type, coordinates: roundCoords(m.geometry.coordinates) },
+    });
+    filled.push(`${iso3}:${owner}`);
+  }
+
+  // A polity the source draws nowhere at all (Cuba in 1900, Aden, Muscat) would be
+  // invisible, so give its lands a modern outline as well.
+  const drawnPolities = new Set(out.features.map((f) => String((f as Feature).properties?.p ?? "")));
+  for (const polity of scenario.polities) {
+    if (drawnPolities.has(polity.id)) continue;
+    for (const land of polity.lands) {
+      const def = COUNTRY_BY_ISO3[land];
+      if (!def) continue;
+      const m = modernFeatures.find((x) => String((x as unknown as { id?: string | number }).id).padStart(3, "0") === def.numeric);
+      if (!m?.geometry) continue;
+      out.features.push({
+        type: "Feature",
+        id: def.numeric,
+        properties: { n: def.name, p: polity.id, h: def.numeric },
+        geometry: { type: m.geometry.type, coordinates: roundCoords(m.geometry.coordinates) },
+      });
+      filled.push(`${land}:${polity.id}`);
+    }
+  }
+
   // Largest features first keeps labels sensible and drawing order stable.
   out.features.sort((a, b) => area(b as Feature) - area(a as Feature));
 
@@ -761,6 +883,7 @@ async function build(year: Year): Promise<void> {
   const missing = [...known].filter((id) => !used.has(id));
   console.log(`${year}: ${out.features.length} polygons -> historical-${year}.json`);
   if (unmapped.length) console.log(`  unmapped (${unmapped.length}): ${[...new Set(unmapped)].sort().join(", ")}`);
+  if (filled.length) console.log(`  filled from modern outlines (${filled.length}): ${filled.sort().join(", ")}`);
   if (missing.length) console.log(`  polities with no polygon (${missing.length}): ${missing.sort().join(", ")}`);
 }
 
