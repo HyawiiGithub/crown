@@ -461,6 +461,54 @@ function hsl(colour: string, dl: number): string {
   return `hsl(${m[1]} ${Math.max(14, Number(m[2]) - 10)}% ${clamp(Number(m[3]) + dl, 18, 82)}%)`;
 }
 
+/**
+ * Colours players recognise from period maps, by scenario year. These win over
+ * the modern defaults below, so 1900 reads like a 1900 atlas: British pink,
+ * French blue, Habsburg yellow, Qing ochre, Weimar grey. Dependencies are tinted
+ * from their overlord's colour afterwards, which is what gives an empire its
+ * family of shades.
+ */
+const PERIOD_COLOURS: Record<number, Record<string, string>> = {
+  1900: {
+    GBR: "hsl(345 58% 54%)", FRA: "hsl(216 52% 48%)", DEU: "hsl(28 14% 44%)", RUS: "hsl(128 30% 38%)",
+    AUT: "hsl(44 58% 56%)", OTT: "hsl(168 30% 36%)", ITA: "hsl(96 30% 44%)", ESP: "hsl(33 62% 50%)",
+    PRT: "hsl(148 42% 36%)", NLD: "hsl(24 78% 52%)", BEL: "hsl(50 52% 44%)", USA: "hsl(212 48% 54%)",
+    JPN: "hsl(352 56% 56%)", CHN: "hsl(42 68% 56%)", KOR: "hsl(222 24% 50%)", THA: "hsl(18 58% 46%)",
+    IRN: "hsl(46 38% 46%)", AFG: "hsl(96 22% 40%)", ETH: "hsl(122 38% 34%)", MAR: "hsl(6 48% 44%)",
+    SAR: "hsl(22 48% 40%)", OFS: "hsl(34 52% 54%)", MEX: "hsl(126 34% 38%)", BRA: "hsl(146 44% 40%)",
+    ARG: "hsl(202 56% 58%)", CHL: "hsl(352 40% 48%)", PER: "hsl(348 36% 46%)", GRC: "hsl(196 44% 48%)",
+    ROU: "hsl(36 44% 46%)", BGR: "hsl(88 26% 40%)", SRB: "hsl(348 44% 42%)", SWE: "hsl(206 40% 50%)",
+    DNK: "hsl(354 42% 48%)", CHE: "hsl(0 40% 46%)", NPL: "hsl(355 46% 50%)", BTN: "hsl(28 38% 48%)",
+  },
+  1914: {
+    GBR: "hsl(345 58% 54%)", FRA: "hsl(216 52% 48%)", DEU: "hsl(28 14% 44%)", RUS: "hsl(128 30% 38%)",
+    AUT: "hsl(44 58% 56%)", OTT: "hsl(168 30% 36%)", ITA: "hsl(96 30% 44%)", ESP: "hsl(33 62% 50%)",
+    PRT: "hsl(148 42% 36%)", NLD: "hsl(24 78% 52%)", BEL: "hsl(50 52% 44%)", USA: "hsl(212 48% 54%)",
+    JPN: "hsl(352 56% 56%)", CHN: "hsl(42 64% 54%)", THA: "hsl(18 58% 46%)", IRN: "hsl(46 38% 46%)",
+    AFG: "hsl(96 22% 40%)", ETH: "hsl(122 38% 34%)", MAR: "hsl(6 48% 44%)", SAU: "hsl(150 40% 34%)",
+    NOR: "hsl(206 46% 54%)", SWE: "hsl(206 34% 50%)", DNK: "hsl(354 42% 48%)", CHE: "hsl(0 40% 46%)",
+    TIB: "hsl(30 42% 54%)", MNG: "hsl(50 42% 46%)", SRB: "hsl(348 44% 42%)", ROU: "hsl(36 44% 46%)",
+    BGR: "hsl(88 26% 40%)", GRC: "hsl(196 44% 48%)", ALB: "hsl(8 40% 40%)", MEX: "hsl(126 34% 38%)",
+    BRA: "hsl(146 44% 40%)", ARG: "hsl(202 56% 58%)", CHL: "hsl(352 40% 48%)", NPL: "hsl(355 46% 50%)",
+  },
+  1930: {
+    GBR: "hsl(345 56% 56%)", FRA: "hsl(216 50% 50%)", DEU: "hsl(28 10% 46%)", USS: "hsl(0 60% 40%)",
+    ITA: "hsl(96 26% 44%)", AUT: "hsl(44 52% 52%)", HUN: "hsl(34 44% 46%)", CSK: "hsl(238 32% 46%)",
+    POL: "hsl(345 42% 46%)", YUG: "hsl(202 28% 44%)", TUR: "hsl(354 44% 46%)", ESP: "hsl(33 58% 48%)",
+    PRT: "hsl(148 40% 34%)", NLD: "hsl(24 74% 50%)", BEL: "hsl(50 50% 44%)", USA: "hsl(212 46% 54%)",
+    JPN: "hsl(352 56% 56%)", CHN: "hsl(46 58% 52%)", SAU: "hsl(150 42% 34%)", IRN: "hsl(42 40% 46%)",
+    AFG: "hsl(96 22% 40%)", ETH: "hsl(122 38% 34%)", EGY: "hsl(50 48% 54%)", IRQ: "hsl(45 52% 46%)",
+    LEV: "hsl(210 40% 46%)", PLM: "hsl(190 34% 48%)", FIN: "hsl(206 40% 52%)", NOR: "hsl(206 34% 50%)",
+    SWE: "hsl(206 30% 48%)", DNK: "hsl(354 42% 48%)", IRL: "hsl(140 44% 42%)", TIB: "hsl(30 42% 54%)",
+    MNG: "hsl(50 42% 46%)", ROU: "hsl(36 44% 46%)", BGR: "hsl(88 26% 40%)", GRC: "hsl(196 44% 48%)",
+    MEX: "hsl(126 34% 38%)", BRA: "hsl(146 44% 40%)", ARG: "hsl(202 56% 58%)", CHL: "hsl(352 40% 48%)",
+  },
+};
+
+function eraColour(id: string, year: number): string | undefined {
+  return PERIOD_COLOURS[year]?.[id] ?? POLITY_COLOURS[id];
+}
+
 /** Colours players recognise from period maps. */
 const POLITY_COLOURS: Record<string, string> = {
   GBR: "hsl(350 62% 52%)", FRA: "hsl(218 58% 48%)", DEU: "hsl(30 18% 42%)", DDR: "hsl(4 48% 40%)", RUS: "hsl(135 32% 40%)", USS: "hsl(0 72% 42%)", AUT: "hsl(42 50% 50%)", OTT: "hsl(165 36% 34%)", ITA: "hsl(95 34% 42%)", USA: "hsl(208 54% 52%)", JPN: "hsl(355 54% 60%)", CHN: "hsl(358 72% 50%)", ESP: "hsl(28 66% 46%)", PRT: "hsl(150 44% 36%)", NLD: "hsl(24 80% 52%)", BEL: "hsl(52 56% 42%)", YUG: "hsl(204 30% 46%)", CSK: "hsl(250 30% 50%)", POL: "hsl(340 42% 62%)",
@@ -584,7 +632,7 @@ function buildCountry(p: PolitySeed, scenario: Scenario, era: EraSettings, rnd: 
   const military = buildMilitary(p.id, p.government, year, pop, gdp * 1e9, economy.budget.defence, rnd);
   const geo = polityGeo(p, world);
   const base = COUNTRY_BY_ISO3[p.id];
-  const colour = POLITY_COLOURS[p.id] ?? colourForCountry(p.id);
+  const colour = eraColour(p.id, scenario.year) ?? colourForCountry(p.id);
   const term = (detail?.termYears ?? 4) * 365;
   const nextYear = detail?.nextElectionYear;
   const startMs = Date.UTC(scenario.startDate.year, scenario.startDate.month - 1, scenario.startDate.day);

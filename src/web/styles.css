@@ -404,7 +404,7 @@ html, body { position: fixed; inset: 0; width: 100%; overflow: hidden; }
 .time-controls { gap: 3px; flex: none; }
 .rail-left, .rail-right { min-height: 0; }
 .truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.map__label { fill: var(--ink); font-family: var(--font-display); font-weight: 600; letter-spacing: .02em; }
+.map__label { fill: var(--ink); font-family: var(--font-display); font-weight: 600; letter-spacing: 0; }
 .spark-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .spark { margin: 0; padding: 8px 10px; background: var(--bg-sunken); border: 1px solid var(--rule); border-radius: var(--radius); min-width: 0; }
 .slider { display: block; margin: 7px 0; cursor: pointer; }

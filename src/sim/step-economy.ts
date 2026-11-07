@@ -1,7 +1,7 @@
 import type { Company, Country, MarketMood, SectorId, SectorState, World } from "../shared/types";
 import { SECTORS } from "../data/economy";
 import { incomeShares, pushEvent, recomputeGlobals, taxCollected } from "./bootstrap";
-import { frontOccupation } from "./occupation";
+
 import { Rng, approach, clamp, clamp01 } from "./rng";
 
 /**
@@ -275,7 +275,11 @@ function stepMacro(world: World, c: Country, rnd: Rng, anchorRate: number, ancho
   const science = budget.science * potentialNominal;
   const subsidies = budget.subsidies * potentialNominal + e.sectors.reduce((a, s) => a + s.stateSubsidy * s.output, 0);
   const warBill = c.wars.length ? Math.min(0.2, 0.02 * c.wars.length) * potentialNominal : 0;
-  f.debtService = f.debt * m.debtCost;
+  // Interest is charged at a capped rate. A broken state can be quoted an
+  // impossible yield, but the stock itself never compounds faster than this,
+  // which is what used to send debt-to-GDP into the quadrillions.
+  const serviceRate = Math.min(Math.max(0, m.debtCost), 0.18);
+  f.debtService = f.debt * serviceRate;
   const spending = f.military + f.welfare + f.healthcare + f.education + f.infrastructure + f.administration + science + subsidies + warBill;
   f.expenditure = spending + f.debtService;
   const balance = f.revenue - f.expenditure;
@@ -287,10 +291,18 @@ function stepMacro(world: World, c: Country, rnd: Rng, anchorRate: number, ancho
   f.treasury = approach(f.treasury, nominal * 0.02, 0.2 * dt) + balance * 0.01 * dt;
   e.rd = science + nominal * 0.004 + e.sectors.reduce((a, s) => a + s.output * SECTORS[s.id].techIntensity * 0.01, 0);
 
-  if (!m.defaulted && (f.debtToGdp > 2.2 + (RESERVE_DISCOUNT[c.id] ?? 0) * 300 || (m.bondYield > 0.35 && f.debtService > f.revenue * 0.5))) {
+  const crisisLine = 2.2 + (RESERVE_DISCOUNT[c.id] ?? 0) * 300;
+  if (!m.defaulted && (f.debtToGdp > crisisLine || (m.bondYield > 0.35 && f.debtService > f.revenue * 0.5))) {
     sovereignCrisis(world, c, rnd);
   }
-  if (m.defaulted && m.riskPremium < 0.08 && rnd.chance(dt * 0.6)) m.defaulted = false;
+  // Serial restructuring. A default only reopens the market once the paper is
+  // back inside the line; while the ratio is still absurd, creditors take
+  // further haircuts rather than the stock compounding forever.
+  if (m.defaulted && f.debtToGdp > crisisLine * 1.6) {
+    e.fiscal.debt *= 0.5;
+    f.debtToGdp = f.debt / nominal;
+  }
+  if (m.defaulted && f.debtToGdp < crisisLine && m.riskPremium < 0.12 && rnd.chance(dt * 1.2)) m.defaulted = false;
 
   // ---- 7. External accounts -----------------------------------------------
   const barriers = c.tradeBarriers ? Object.values(c.tradeBarriers).reduce((a, b) => a + b, 0) : 0;
@@ -850,11 +862,9 @@ export function warLoad(world: World, c: Country): number {
       const losing = i === 0 ? -f.control : f.control;
       load += 0.0012 * Math.max(0, losing + 20) * 0.1;
     }
-    for (const f of w.fronts) {
-      // Occupied land produces nothing for the country that lost it.
-      const held = frontOccupation(w, f, world.countries);
-      if (held?.territory === c.id) load += held.share * 0.12;
-    }
+    // Occupation does not take output or people away from the country that lost
+    // the ground: the line on the map is a military fact, not a transfer. Only a
+    // signed peace deal moves land, population and GDP.
   }
   return clamp(load, 0, 0.3);
 }

@@ -566,9 +566,28 @@ export function sessionCookieName(env: Env): string {
   return env.SESSION_COOKIE || "crown_session";
 }
 
-/** Share the login between the bare domain and www. */
-function cookieDomain(env: Env): string {
-  return env.ENVIRONMENT === "production" ? "; Domain=crowngamestudios.com" : "";
+/** Share the login between the bare domain and www, but only on the real site.
+ *
+ *  This keys off the request origin rather than ENVIRONMENT: wrangler.toml runs
+ *  the local dev server with ENVIRONMENT=production and the production
+ *  PUBLIC_ORIGIN, so the old check stamped `Domain=crowngamestudios.com` onto
+ *  localhost sessions. The browser discarded those cookies and every local
+ *  sign-in silently failed. The Secure flag belongs to an https origin too. */
+function cookieDomain(requestUrl?: string): string {
+  const host = hostOf(requestUrl);
+  return host.endsWith("crowngamestudios.com") ? "; Domain=crowngamestudios.com" : "";
+}
+
+function cookieSecure(requestUrl?: string): string {
+  return requestUrl?.startsWith("https://") ? " Secure;" : "";
+}
+
+function hostOf(requestUrl?: string): string {
+  try {
+    return requestUrl ? new URL(requestUrl).hostname : "";
+  } catch {
+    return "";
+  }
 }
 
 export async function createSession(env: Env, user: User, ip?: string, userAgent?: string): Promise<{ token: string; expiresAt: number }> {
@@ -661,11 +680,10 @@ export async function recordLoginAttempt(env: Env, bucket: string): Promise<void
   await env.DB.prepare(`DELETE FROM rate_limits WHERE window_start < ?`).bind(windowStart - 60).run().catch(() => undefined);
 }
 
-export function sessionCookie(env: Env, token: string, maxAge: number): string {
-  const secure = env.ENVIRONMENT === "production" ? " Secure;" : "";
-  return `${sessionCookieName(env)}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}${cookieDomain(env)}`;
+export function sessionCookie(env: Env, token: string, maxAge: number, requestUrl?: string): string {
+  return `${sessionCookieName(env)}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${cookieSecure(requestUrl)}${cookieDomain(requestUrl)}`;
 }
 
-export function clearCookie(env: Env): string {
-  return `${sessionCookieName(env)}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${cookieDomain(env)}`;
+export function clearCookie(env: Env, requestUrl?: string): string {
+  return `${sessionCookieName(env)}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${cookieDomain(requestUrl)}`;
 }

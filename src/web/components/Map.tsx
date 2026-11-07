@@ -164,17 +164,21 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
 
   const regionPaths = useMemo(
     () =>
-      regions.map((r) => {
+      regions
+        // A historical basemap carries its own borders, so only land handed over
+        // by a peace deal is painted on top of it.
+        .filter((r) => !historical || r.id.startsWith("ceded-"))
+        .map((r) => {
         const pts = r.ring.map((p) => projection(p)).filter(Boolean) as [number, number][];
         return { ...r, d: `M${pts.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join("L")}Z`, cx: pts.reduce((a, p) => a + p[0], 0) / pts.length, cy: pts.reduce((a, p) => a + p[1], 0) / pts.length };
       }),
-    [regions, projection],
+    [regions, projection, historical],
   );
 
   // The hosts of a region are modern ISO3 codes; find their polygons to clip against.
   const hostPaths = useMemo(() => {
-    const byIso = new Map<string, string>();
-    for (const c of drawn) byIso.set(c.key, c.path);
+    const byIso = new Map<string, string[]>();
+    for (const c of drawn) byIso.set(c.key, [...(byIso.get(c.key) ?? []), c.path]);
     return byIso;
   }, [drawn]);
 
@@ -242,7 +246,40 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
 
   /** Who owns a polygon now. Historical basemaps know their day-one polity, and
    *  follow `control` afterwards so annexations and peace deals recolour them. */
-  const ownerOf = useCallback((f: Drawn): string => control[f.key] || f.fallback || (historical ? "" : f.key), [control, historical]);
+  /** Who held each modern land on day one. A historical polygon keeps its own
+   *  polity until the land under it actually changes hands, so modern borders
+   *  never leak into a 1900 map. */
+  const dayOne = useMemo(() => {
+    const claimed = new Map<string, string>();
+    for (const c of Object.values(countries)) for (const land of c.lands ?? []) if (!claimed.has(land)) claimed.set(land, c.id);
+    const owner = (land: string, depth = 0): string | undefined => {
+      const direct = claimed.get(land);
+      if (direct) return direct;
+      if (depth > 3) return undefined;
+      const next = TERRITORY_OWNER[land];
+      return next ? owner(next, depth + 1) : undefined;
+    };
+    const m = new Map<string, string>();
+    for (const iso3 of Object.keys(COUNTRY_BY_ISO3)) {
+      const numeric = COUNTRY_BY_ISO3[iso3]?.numeric;
+      const held = owner(iso3);
+      if (numeric && held) m.set(numeric, held);
+    }
+    return m;
+  }, [countries]);
+
+  /** Who owns a polygon now. Historical basemaps already know their day-one
+   *  polity, so `control` only takes over where the land has changed hands. */
+  const ownerOf = useCallback(
+    (f: Drawn): string => {
+      const now = control[f.key];
+      if (!historical) return now || f.key;
+      const start = dayOne.get(f.key);
+      if (!now || (start && now === start)) return f.fallback || now || "";
+      return now;
+    },
+    [control, historical, dayOne],
+  );
 
   // ---- labels: the biggest polygon of each major polity -------------------
   const labels = useMemo(() => {
@@ -414,14 +451,14 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
             );
           })}
 
-          {!historical && (
+          {regionPaths.length > 0 && (
             <>
               <defs>
                 {regionPaths.map((r) => (
                   <clipPath id={`clip-${r.id}`} key={r.id}>
                     {r.hosts.map((iso) => {
-                      const d = hostPaths.get(numericOf(iso));
-                      return d ? <path key={iso} d={d} /> : null;
+                      const paths = hostPaths.get(numericOf(iso)) ?? [];
+                      return paths.map((d, i) => <path key={`${iso}-${i}`} d={d} />);
                     })}
                   </clipPath>
                 ))}
