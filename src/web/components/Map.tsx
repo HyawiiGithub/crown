@@ -342,7 +342,7 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
         const home = anchor ? projection(anchor) : null;
         // Only the home region counts. A wide radius let Greenland answer for
         // Copenhagen, so the name fell back to a possession instead of the capital.
-        const radius = Math.max(28, size.w * 0.06);
+        const radius = 0;
         const near = home ? list.filter((p) => Math.hypot(p.x - home[0], p.y - home[1]) < radius) : [];
         const pool = near.length ? near : list;
         // With a capital, centre on the largest landmass near it. Averaging every
@@ -361,8 +361,8 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
         const major = near.filter((p) => p.area >= biggest * 0.2);
         const candidates = major.length ? major : near;
         const anchorPart = candidates.length ? candidates.reduce((a, p) => (dist(p) < dist(a) ? p : a), candidates[0]) : null;
-        const x = anchorPart ? anchorPart.x : home ? home[0] : pool.reduce((a, p) => a + p.x * p.area, 0) / total;
-        const y = anchorPart ? anchorPart.y : home ? home[1] : pool.reduce((a, p) => a + p.y * p.area, 0) / total;
+        const x = anchorPart ? anchorPart.x : pool.reduce((a, p) => a + p.x * p.area, 0) / total;
+        const y = anchorPart ? anchorPart.y : pool.reduce((a, p) => a + p.y * p.area, 0) / total;
         const spread = Math.sqrt(total);
         // Second choice: the polity's biggest landmass, in case the first spot collides
         // with a neighbour and the label would otherwise be dropped entirely (Russia
