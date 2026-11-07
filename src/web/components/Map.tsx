@@ -354,10 +354,15 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
       if (font < 8) continue;
       const halfW = (font * name.length * 0.56) / 2 / k + 1 / k;
       const halfH = (font * 0.65) / k;
-      const box = { x0: l.x - halfW, y0: l.y - halfH, x1: l.x + halfW, y1: l.y + halfH };
-      if (taken.some((t) => box.x0 < t.x1 && box.x1 > t.x0 && box.y0 < t.y1 && box.y1 > t.y0)) continue;
-      taken.push(box);
-      out.push({ id: l.id, name, x: l.x, y: l.y, font });
+      // A crowded neighbourhood should not cost a major power its name: nudge the
+      // label above or below its anchor before dropping it entirely.
+      for (const dy of [0, halfH * 2.6, -halfH * 2.6]) {
+        const box = { x0: l.x - halfW, y0: l.y + dy - halfH, x1: l.x + halfW, y1: l.y + dy + halfH };
+        if (taken.some((t) => box.x0 < t.x1 && box.x1 > t.x0 && box.y0 < t.y1 && box.y1 > t.y0)) continue;
+        taken.push(box);
+        out.push({ id: l.id, name, x: l.x, y: l.y + dy, font });
+        break;
+      }
     }
     return out;
   }, [labels, countries, transform.k]);
