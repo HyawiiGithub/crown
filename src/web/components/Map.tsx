@@ -388,14 +388,24 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
       if (font < 8) continue;
       const halfW = (font * name.length * 0.56) / 2 / k + 1 / k;
       const halfH = (font * 0.65) / k;
-      // A crowded neighbourhood should not cost a major power its name: nudge the
-      // label above or below its anchor before dropping it entirely.
-      for (const dy of [0, halfH * 2.6, -halfH * 2.6]) {
-        const box = { x0: l.x - halfW, y0: l.y + dy - halfH, x1: l.x + halfW, y1: l.y + dy + halfH };
-        if (taken.some((t) => box.x0 < t.x1 && box.x1 > t.x0 && box.y0 < t.y1 && box.y1 > t.y0)) continue;
-        taken.push(box);
-        out.push({ id: l.id, name, x: l.x, y: l.y + dy, font });
-        break;
+      // A crowded neighbourhood should not cost a country its name: try nudging up
+      // and down at the first spot, then fall back to the largest landmass before
+      // dropping the label entirely.
+      const spots = [
+        { x: l.x, y: l.y },
+        { x: l.altX, y: l.altY },
+      ];
+      let placed = false;
+      for (const spot of spots) {
+        if (placed) break;
+        for (const dy of [0, halfH * 2.6, -halfH * 2.6]) {
+          const box = { x0: spot.x - halfW, y0: spot.y + dy - halfH, x1: spot.x + halfW, y1: spot.y + dy + halfH };
+          if (taken.some((t) => box.x0 < t.x1 && box.x1 > t.x0 && box.y0 < t.y1 && box.y1 > t.y0)) continue;
+          taken.push(box);
+          out.push({ id: l.id, name, x: spot.x, y: spot.y + dy, font });
+          placed = true;
+          break;
+        }
       }
     }
     return out;
