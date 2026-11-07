@@ -332,7 +332,14 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
         const len = countries[id]?.name.length ?? 10;
         return home ? { id, x: home[0], y: home[1], w: len * 8, h: 26, area: v.main.area } : { id, ...v.main };
       })
-      .sort((a, b) => b.area - a.area);
+      // Sovereign states get their names before their colonies do, so an empire
+      // is never crowded off the map by "Anglo-Egyptian Sudan" sitting next to it.
+      .sort((a, b) => {
+        const depA = countries[a.id]?.overlord ? 1 : 0;
+        const depB = countries[b.id]?.overlord ? 1 : 0;
+        if (depA !== depB) return depA - depB;
+        return (countries[b.id]?.economy.gdp ?? 0) - (countries[a.id]?.economy.gdp ?? 0);
+      });
   }, [drawn, ownerOf, historical, projection, countries]);
 
   // Fit each name inside its land at this zoom, biggest countries first, and never overlap.
