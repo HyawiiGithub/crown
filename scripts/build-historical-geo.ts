@@ -810,9 +810,7 @@ async function build(year: Year): Promise<void> {
   // fallback outline owned by whoever holds that land in this scenario.
   const outlines = out.features
     .filter((f) => (f as Feature).geometry)
-    .map((f) => ({ geometry: (f as Feature).geometry!, box: bboxOf((f as Feature).geometry!) }));
-  const insideSomePolygon = (pt: [number, number]) =>
-    outlines.some(({ geometry, box }) => pt[0] >= box[0] && pt[0] <= box[2] && pt[1] >= box[1] && pt[1] <= box[3] && pointInGeometry(geometry, pt));
+    .map((f) => ({ geometry: (f as Feature).geometry!, box: bboxOf((f as Feature).geometry!), p: String((f as Feature).properties?.p ?? "") }));
   const ownerOfLand = (land: string, depth = 0): string | undefined => {
     const direct = landToPolity.get(land);
     if (direct) return direct;
@@ -829,21 +827,33 @@ async function build(year: Year): Promise<void> {
     const iso3 = numeric ? COUNTRY_BY_NUMERIC[numeric]?.iso3 : undefined;
     if (!iso3 || !m.geometry) continue;
     const box = bboxOf(m.geometry);
-    let inside = 0;
-    let covered = 0;
     // Sample a grid inside the modern outline: a handful of points is enough to
     // tell a real gap from a coastline that simply differs by a few kilometres.
+    const pts: [number, number][] = [];
     for (let x = 0; x < 6; x++) {
       for (let y = 0; y < 6; y++) {
         const pt: [number, number] = [box[0] + ((box[2] - box[0]) * (x + 0.5)) / 6, box[1] + ((box[3] - box[1]) * (y + 0.5)) / 6];
-        if (!pointInGeometry(m.geometry, pt)) continue;
-        inside++;
-        if (insideSomePolygon(pt)) covered++;
+        if (pointInGeometry(m.geometry, pt)) pts.push(pt);
       }
     }
-    if (inside === 0 || covered / inside >= 0.5) continue;
+    if (!pts.length) continue;
     const owner = ownerOfLand(iso3);
     if (!owner || !known.has(owner)) continue;
+    let covered = 0;
+    let foreign = 0;
+    for (const pt of pts) {
+      const hits = outlines.filter((o) => pt[0] >= o.box[0] && pt[0] <= o.box[2] && pt[1] >= o.box[1] && pt[1] <= o.box[3] && pointInGeometry(o.geometry, pt));
+      if (hits.length) covered++;
+      if (hits.some((h) => h.p && h.p !== owner)) foreign++;
+    }
+    // Fill whenever the source leaves a visible hole, not only when it leaves most
+    // of the land blank: a half-drawn colony still showed empty spaces. Europe is
+    // exempt: there the source is dense, so a surviving hole means a border that
+    // really moved (Alsace, Schleswig, East Prussia) and a modern outline would
+    // paint today's frontier over it. Elsewhere a heavy foreign overlap still wins.
+    if (COUNTRY_BY_ISO3[iso3]?.continent === "Europe") continue;
+    if (covered / pts.length >= 0.9) continue;
+    if (foreign / pts.length > 0.6) continue;
     out.features.push({
       type: "Feature",
       // The map keys ownership off `id` first, then the name. A fallback outline
