@@ -347,12 +347,15 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
         // part would let a distant island pull the name off the country (Denmark
         // ended up labelled on Greenland).
         const total = pool.reduce((a, p) => a + p.area, 0) || 1;
-        const anchorPart = near.length ? near.reduce((a, p) => (p.area > a.area ? p : a), near[0]) : null;
-        // If the source draws no land near this capital at all (Denmark's peninsula is
-        // missing from the 1900 file), name it at the capital rather than on whatever
-        // distant possession happens to be biggest.
-        const x = anchorPart ? anchorPart.x : home && !near.length ? home[0] : pool.reduce((a, p) => a + p.x * p.area, 0) / total;
-        const y = anchorPart ? anchorPart.y : home && !near.length ? home[1] : pool.reduce((a, p) => a + p.y * p.area, 0) / total;
+        // Take the land nearest the capital, not the biggest one in its neighbourhood:
+        // the Ottoman Empire's largest nearby province is the Levant, which put its
+        // name in the Middle East instead of Anatolia. If the source draws no land
+        // near the capital at all (Denmark's peninsula is missing from the 1900 file),
+        // name it at the capital rather than on a distant possession.
+        const dist = (p: { x: number; y: number }) => (home ? Math.hypot(p.x - home[0], p.y - home[1]) : 0);
+        const anchorPart = near.length ? near.reduce((a, p) => (dist(p) < dist(a) ? p : a), near[0]) : null;
+        const x = anchorPart ? anchorPart.x : home ? home[0] : pool.reduce((a, p) => a + p.x * p.area, 0) / total;
+        const y = anchorPart ? anchorPart.y : home ? home[1] : pool.reduce((a, p) => a + p.y * p.area, 0) / total;
         const spread = Math.sqrt(total);
         return { id, x, y, w: Math.min(180, spread * 1.7), h: Math.min(90, spread), area: total };
       })
