@@ -42,11 +42,14 @@ const params = (over: Partial<SimulationParams>): SimulationParams => ({ ...DEFA
 // every era. This is the single biggest lever against a generic look.
 // ---------------------------------------------------------------------------
 
-const OLDSTYLE = "'Iowan Old Style','Palatino Linotype',Palatino,'Book Antiqua',Georgia,serif";
+// Georgia first: it is the one book serif that ships on every Windows and macOS
+// machine and keeps its spacing at small sizes. Palatino used to lead this stack
+// and made the 1900 text look uneven and blobby, especially on the map.
+const OLDSTYLE = "Georgia,'Iowan Old Style','Palatino Linotype',Palatino,'Book Antiqua',serif";
 const TRANSITIONAL = "'Times New Roman',Times,'Liberation Serif',serif";
 const GEOMETRIC = "Futura,'Avenir Next','Century Gothic','URW Gothic','Trebuchet MS',sans-serif";
 const GROTESQUE = "'Helvetica Neue',Helvetica,Arial,'Liberation Sans',sans-serif";
-const CONDENSED = "'Haettenschweiler','Arial Narrow','Arial Narrow Bold','Liberation Sans Narrow',Impact,sans-serif";
+const CONDENSED = "'Arial Narrow','Roboto Condensed','Liberation Sans Narrow','Helvetica Neue',Arial,sans-serif";
 const MONO = "'SF Mono','JetBrains Mono',Menlo,Consolas,'Liberation Mono',monospace";
 const SANS = "'Inter','Segoe UI',system-ui,'Helvetica Neue',Arial,sans-serif";
 
