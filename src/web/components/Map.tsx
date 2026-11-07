@@ -57,6 +57,26 @@ let rawCache: RawFeature[] | null = null;
 
 /** Scenarios whose map comes from the historical basemap instead of modern borders. */
 const HISTORICAL_SCENARIOS = new Set(["1900", "1914", "1930"]);
+
+/**
+ * Where a polity's name belongs, when its largest polygon is not its heartland.
+ * Without this the Ottoman Empire is labelled in the Arabian desert and the
+ * British Empire in whichever colony happens to be biggest.
+ */
+const LABEL_ANCHORS: Record<string, [number, number]> = {
+  GBR: [-0.13, 51.5], FRA: [2.35, 48.86], DEU: [13.4, 52.52], AUT: [16.37, 48.21],
+  OTT: [33.0, 39.5], TUR: [32.86, 39.93], RUS: [30.3, 59.94], USS: [37.6, 55.75],
+  ESP: [-3.7, 40.42], PRT: [-9.14, 38.72], NLD: [4.9, 52.37], BEL: [4.35, 50.85],
+  ITA: [12.5, 41.9], DNK: [12.57, 55.68], SWE: [18.07, 59.33], NOR: [10.75, 59.91],
+  USA: [-77.04, 38.9], CHN: [116.4, 39.9], JPN: [139.7, 35.7], RAJ: [77.2, 28.6],
+  EGY: [31.2, 30.0], EGP: [31.2, 30.0], MAR: [-6.8, 34.0], ALG: [3.06, 36.75],
+  IRN: [51.4, 35.7], SAU: [46.7, 24.7], ETH: [38.75, 9.0], SUD: [32.5, 15.6],
+  AOF: [-17.45, 14.7], AEF: [15.3, -4.3], NIG: [7.5, 9.0], BWF: [-1.0, 7.0],
+  GWA: [9.7, 4.05], GEA: [39.28, -6.8], EIS: [38.9, 15.3], PAF: [13.2, -8.8],
+  BEA: [36.8, -1.3], RHO: [31.05, -17.8], CPC: [18.4, -33.9], ZAF: [28.2, -25.7],
+  SAR: [28.2, -25.7], OFS: [26.2, -29.1], COD: [15.3, -4.3], MDG: [47.5, -18.9],
+  IDC: [105.8, 21.0], DEI: [106.8, -6.2], KOR: [127.0, 37.5], THA: [100.5, 13.75],
+};
 const historicalCache = new Map<string, RawFeature[] | null>();
 
 async function loadHistorical(id: string): Promise<RawFeature[] | null> {
@@ -158,6 +178,15 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
     }
     return out;
   }, [raw, historical, pathGen]);
+
+  // The historical basemap is the only land layer, so anywhere the source draws
+  // nothing used to show the paper through as a hole. Paint every modern land in
+  // its scenario owner's colour underneath: the historical polygons still draw
+  // their own borders on top, and a missing polygon can no longer leave a gap.
+  const base = useMemo(() => {
+    if (!historical || !raw) return [];
+    return raw.map((f) => ({ key: featureKey(f), path: pathGen(f as never) ?? "" })).filter((b) => b.path);
+  }, [historical, raw, pathGen]);
 
   const graticule = useMemo(() => pathGen(geoGraticule10()) ?? "", [pathGen]);
   const sphere = useMemo(() => pathGen({ type: "Sphere" } as never) ?? "", [pathGen]);
@@ -281,18 +310,22 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
     [control, historical, dayOne],
   );
 
-  // ---- labels: the biggest polygon of each major polity -------------------
+  // ---- labels: the biggest polygon in each polity's heartland --------------
   const labels = useMemo(() => {
-    const best = new Map<string, Drawn["main"]>();
+    const best = new Map<string, { main: Drawn["main"]; onHome: boolean }>();
     for (const f of drawn) {
       const id = ownerOf(f);
       // Overseas territories do not carry the owner's name: no "Denmark" on Greenland.
       if (!id || (!historical && TERRITORY_OWNER[f.key])) continue;
+      const anchor = LABEL_ANCHORS[id];
+      const home = anchor ? projection(anchor) : null;
+      const radius = Math.max(70, size.w * 0.16);
+      const onHome = !home || Math.hypot(f.main.x - home[0], f.main.y - home[1]) < radius;
       const cur = best.get(id);
-      if (!cur || f.main.area > cur.area) best.set(id, f.main);
+      if (!cur || (onHome && !cur.onHome) || (onHome === cur.onHome && f.main.area > cur.main.area)) best.set(id, { main: f.main, onHome });
     }
-    return [...best.entries()].sort((a, b) => b[1].area - a[1].area).map(([id, main]) => ({ id, ...main }));
-  }, [drawn, ownerOf, historical]);
+    return [...best.entries()].map(([id, v]) => ({ id, ...v.main })).sort((a, b) => b.area - a.area);
+  }, [drawn, ownerOf, historical, projection, size.w]);
 
   // Fit each name inside its land at this zoom, biggest countries first, and never overlap.
   const placedLabels = useMemo(() => {
@@ -431,6 +464,12 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
         <g transform={`translate(${transform.x} ${transform.y}) scale(${transform.k})`}>
           <path d={sphere} className="map__sphere" />
           <path className="map__graticule" d={graticule} strokeWidth={0.4} />
+          {historical &&
+            base.map((b, i) => {
+              const id = control[b.key];
+              const c = id ? countries[id] : undefined;
+              return <path key={`base-${b.key}-${i}`} d={b.path} fill={c ? fills.get(id) ?? theme.unclaimed : theme.unclaimed} stroke="none" style={{ pointerEvents: "none" }} />;
+            })}
           {drawn.map((f, i) => {
             const id = ownerOf(f);
             const c = id ? countries[id] : undefined;
