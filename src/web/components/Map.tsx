@@ -344,7 +344,10 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
         const home = anchor ? projection(anchor) : null;
         // Only the home region counts. A wide radius let Greenland answer for
         // Copenhagen, so the name fell back to a possession instead of the capital.
-        const radius = 0;
+        // A capital anchor should only gather the parts around it: without a radius
+        // French Guiana and Réunion pulled France's name out into the Atlantic (it
+        // landed on Spain), and Greenland answered for Copenhagen.
+        const radius = size.w * 0.12;
         const near = home ? list.filter((p) => Math.hypot(p.x - home[0], p.y - home[1]) < radius) : [];
         const pool = near.length ? near : list;
         // With a capital, centre on the largest landmass near it. Averaging every
