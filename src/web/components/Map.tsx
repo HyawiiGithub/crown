@@ -340,7 +340,9 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
         // the country it belongs to.
         const anchor = LABEL_ANCHORS[id];
         const home = anchor ? projection(anchor) : null;
-        const radius = Math.max(70, size.w * 0.16);
+        // Only the home region counts. A wide radius let Greenland answer for
+        // Copenhagen, so the name fell back to a possession instead of the capital.
+        const radius = Math.max(28, size.w * 0.06);
         const near = home ? list.filter((p) => Math.hypot(p.x - home[0], p.y - home[1]) < radius) : [];
         const pool = near.length ? near : list;
         // With a capital, centre on the largest landmass near it. Averaging every
