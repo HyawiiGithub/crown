@@ -73,7 +73,7 @@ const HISTORICAL_SCENARIOS = new Set(["1900", "1914", "1930"]);
  */
 const LABEL_ANCHORS: Record<string, [number, number]> = {
   GBR: [-0.13, 51.5], FRA: [2.35, 48.86], DEU: [13.4, 52.52], AUT: [16.37, 48.21],
-  OTT: [33.0, 39.5], TUR: [32.86, 39.93], RUS: [30.3, 59.94], USS: [37.6, 55.75],
+  OTT: [33.0, 39.5], TUR: [32.86, 39.93], RUS: [50.0, 56.0], USS: [50.0, 56.0],
   ESP: [-3.7, 40.42], PRT: [-9.14, 38.72], NLD: [4.9, 52.37], BEL: [4.35, 50.85],
   ITA: [12.5, 41.9], DNK: [12.57, 55.68], SWE: [18.07, 59.33], NOR: [10.75, 59.91],
   USA: [-77.04, 38.9], CHN: [116.4, 39.9], JPN: [139.7, 35.7], RAJ: [77.2, 28.6],
@@ -351,27 +351,13 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
         // A capital anchor should only gather the parts around it: without a radius
         // French Guiana and Réunion pulled France's name out into the Atlantic (it
         // landed on Spain), and Greenland answered for Copenhagen.
-        const radius = size.w * 0.12;
-        const near = home ? list.filter((p) => Math.hypot(p.x - home[0], p.y - home[1]) < radius) : [];
-        const pool = near.length ? near : list;
-        // With a capital, centre on the largest landmass near it. Averaging every
-        // part would let a distant island pull the name off the country (Denmark
-        // ended up labelled on Greenland).
-        const total = pool.reduce((a, p) => a + p.area, 0) || 1;
-        // Take the land nearest the capital, not the biggest one in its neighbourhood:
-        // the Ottoman Empire's largest nearby province is the Levant, which put its
-        // name in the Middle East instead of Anatolia. If the source draws no land
-        // near the capital at all (Denmark's peninsula is missing from the 1900 file),
-        // name it at the capital rather than on a distant possession.
-        const dist = (p: { x: number; y: number }) => (home ? Math.hypot(p.x - home[0], p.y - home[1]) : 0);
-        // Ignore specks: a small island can sit closer to the capital than the
-        // mainland and pull the name offshore (the Ottomans landed on Cyprus).
-        const biggest = near.reduce((a, p) => Math.max(a, p.area), 0);
-        const major = near.filter((p) => p.area >= biggest * 0.2);
-        const candidates = major.length ? major : near;
-        const anchorPart = candidates.length ? candidates.reduce((a, p) => (dist(p) < dist(a) ? p : a), candidates[0]) : null;
-        const x = anchorPart ? anchorPart.x : pool.reduce((a, p) => a + p.x * p.area, 0) / total;
-        const y = anchorPart ? anchorPart.y : pool.reduce((a, p) => a + p.y * p.area, 0) / total;
+        // A hand-placed anchor is where the name belongs. Choosing the nearest province
+        // instead drifts into whichever fragment sits closest to the capital: the
+        // Russian Empire's name fell into Ukraine and the USSR's into the Caucasus,
+        // because their western pieces sit nearest Moscow while the mass is far east.
+        const total = list.reduce((acc, p) => acc + p.area, 0) || 1;
+        const x = home ? home[0] : list.reduce((acc, p) => acc + p.x * p.area, 0) / total;
+        const y = home ? home[1] : list.reduce((acc, p) => acc + p.y * p.area, 0) / total;
         const spread = Math.sqrt(total);
         // Second choice: the polity's biggest landmass, in case the first spot collides
         // with a neighbour and the label would otherwise be dropped entirely (Russia
@@ -420,6 +406,16 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
           break;
         }
       }
+    }
+    // A crowded map should not cost a big country its name: put it on its own
+    // centre even when every nearby spot was taken.
+    for (const l of labels) {
+      if (out.some((o) => o.id === l.id)) continue;
+      const name = countries[l.id]?.name;
+      if (!name) continue;
+      const font = Math.min(13, (l.w * k * 0.92) / (name.length * 0.56), l.h * k * 0.7);
+      if (font < 10) continue;
+      out.push({ id: l.id, name, x: l.x, y: l.y, font });
     }
     return out;
   }, [labels, countries, transform.k]);
