@@ -346,11 +346,6 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
         // the country it belongs to.
         const anchor = LABEL_ANCHORS[id];
         const home = anchor ? projection(anchor) : null;
-        // Only the home region counts. A wide radius let Greenland answer for
-        // Copenhagen, so the name fell back to a possession instead of the capital.
-        // A capital anchor should only gather the parts around it: without a radius
-        // French Guiana and Réunion pulled France's name out into the Atlantic (it
-        // landed on Spain), and Greenland answered for Copenhagen.
         // A hand-placed anchor is where the name belongs. Choosing the nearest province
         // instead drifts into whichever fragment sits closest to the capital: the
         // Russian Empire's name fell into Ukraine and the USSR's into the Caucasus,
