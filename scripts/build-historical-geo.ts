@@ -961,8 +961,63 @@ async function build(year: Year): Promise<void> {
       used.set("OTT", (used.get("OTT") ?? 0) + 1);
     }
   }
+  // ---- the roster wins --------------------------------------------------
+  // The source draws some borders differently from the scenario's own land model
+  // (it hands Bulgaria all of Thrace, for one). Where the polity the roster gives a
+  // land is not the one drawn on top of it, the roster's owner is painted over that
+  // land as a clean patch, so the map agrees with `control` and with the sim.
+  // Match a land to its modern outline by name: islands and multi-part countries
+  // have their centroid in the sea, so a point lookup misses them.
+  const nameToNumeric = new Map<string, string>();
+  for (const c of Object.values(COUNTRY_BY_ISO3)) nameToNumeric.set(c.name, c.numeric);
+  const numericToModern = new Map<string, Feature>();
+  for (const m of modernFeatures) {
+    const name = String((m.properties as { name?: unknown } | undefined)?.name ?? "");
+    const numeric = nameToNumeric.get(name);
+    if (numeric) numericToModern.set(numeric, m);
+  }
+  const patches: { type: "Feature"; properties: Record<string, unknown>; geometry: Feature["geometry"] }[] = [];
+  const sample = 4;
+  for (const [iso3, expected] of landToPolity) {
+    if (!expected) continue;
+    const numeric = String(COUNTRY_BY_ISO3[iso3]?.numeric ?? "").padStart(3, "0");
+    const shape = numericToModern.get(numeric);
+    if (!shape) continue;
+    const box = bboxOf(shape.geometry);
+    const votes = new Map<string, number>();
+    for (let i = 1; i < sample; i += 1) {
+      for (let j = 1; j < sample; j += 1) {
+        const pt: [number, number] = [box[0] + ((box[2] - box[0]) * i) / sample, box[1] + ((box[3] - box[1]) * j) / sample];
+        if (!pointInGeometry(shape.geometry, pt)) continue;
+        let top = "";
+        let topA = Infinity;
+        for (const sh of shapes) {
+          if (!pointInGeometry(sh.geometry, pt)) continue;
+          const shArea = area(sh);
+          if (shArea < topA) { topA = shArea; top = sh.properties.p; }
+        }
+        if (top) votes.set(top, (votes.get(top) ?? 0) + 1);
+      }
+    }
+    let best = "";
+    let bestN = 0;
+    for (const [p, n] of votes) if (n > bestN) { best = p; bestN = n; }
+    if (best === expected) continue;
+    patches.push({ type: "Feature", properties: { n: expected, p: expected, h: numeric, z: 1 }, geometry: shape.geometry });
+  }
+  for (const p of patches) {
+    out.features.push(p);
+    used.set(String(p.properties.p), (used.get(String(p.properties.p)) ?? 0) + 1);
+  }
+  if (patches.length) console.log(`  painted over source borders on ${patches.length} lands`);
   // Largest features first keeps labels sensible and drawing order stable.
-  out.features.sort((a, b) => area(b as Feature) - area(a as Feature));
+  // Patches sort last so they sit on top of whatever the source drew there.
+  out.features.sort((a, b) => {
+    const za = Number((a as { properties?: { z?: number } }).properties?.z ?? 0);
+    const zb = Number((b as { properties?: { z?: number } }).properties?.z ?? 0);
+    if (za !== zb) return za - zb;
+    return area(b as Feature) - area(a as Feature);
+  });
 
   writeFileSync(join(OUT, `historical-${year}.json`), JSON.stringify(out));
   const missing = [...known].filter((id) => !used.has(id));
