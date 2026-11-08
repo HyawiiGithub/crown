@@ -57,6 +57,10 @@ interface Drawn {
 }
 
 const WORLD_URL = "/geo/countries-50m.json";
+// Replaced at build time, so a new deployment asks for fresh geometry instead of
+// reusing whatever the browser cached for the bare filename.
+declare const __GEO_VERSION__: string;
+const GEO_SUFFIX = typeof __GEO_VERSION__ === "string" ? `?v=${__GEO_VERSION__}` : "";
 let rawCache: RawFeature[] | null = null;
 
 /** Scenarios whose map comes from the historical basemap instead of modern borders. */
@@ -87,7 +91,7 @@ async function loadHistorical(id: string): Promise<RawFeature[] | null> {
   if (!HISTORICAL_SCENARIOS.has(id)) return null;
   if (historicalCache.has(id)) return historicalCache.get(id) ?? null;
   try {
-    const res = await fetch(`/geo/historical-${id}.json`);
+    const res = await fetch(`/geo/historical-${id}.json${GEO_SUFFIX}`);
     if (!res.ok) throw new Error(String(res.status));
     const fc = (await res.json()) as { features?: RawFeature[] };
     const features = fc.features ?? [];

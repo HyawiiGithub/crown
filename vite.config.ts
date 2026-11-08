@@ -13,6 +13,10 @@ export default defineConfig({
       "/cdn-cgi": { target: API_TARGET, changeOrigin: true },
     },
   },
+  define: {
+    // Stamped per build so /geo requests never reuse a cached response.
+    __GEO_VERSION__: JSON.stringify(Date.now().toString(36)),
+  },
   build: {
     outDir: "dist",
     sourcemap: true,
