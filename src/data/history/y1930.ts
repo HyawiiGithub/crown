@@ -106,4 +106,5 @@ ARG|Argentina|PRES|-10|none|11.9|3.6|President:Hipolito Yrigoyen|-|||Radical Civ
 URY|Uruguay|PRES|-15|none|1.9|0.65|President:Juan Campisteguy|-|||Colorado Party
 PRY|Paraguay|PRES|10|none|0.9|0.05|President:Jose Patricio Guggiari
 BRA|Brazil|FR|15|none|35|2.9|President:Washington Luis
+PAN|Panama|PRES|10|none|0.5|0.09|President:Florencio H. Arosemena|-|||Liberal Party
 `) };

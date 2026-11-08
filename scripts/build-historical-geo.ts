@@ -375,7 +375,7 @@ const ALIASES: Record<Year, Record<string, string>> = {
     "american samoa": "USA",
     philippines: "UOT",
     "puerto rico": "UOT",
-    panama: "USA",
+    panama: "PAN",
     cuba: "CUB",
     haiti: "HTI",
     "dominican republic": "DOM",
@@ -599,6 +599,7 @@ const ALIASES: Record<Year, Record<string, string>> = {
     persia: "IRN",
     afghanistan: "AFG",
     nepal: "NPL",
+    panama: "PAN",
     bhutan: "BTN",
     "muscat and oman": "OMN",
     oman: "OMN",
@@ -910,6 +911,56 @@ async function build(year: Year): Promise<void> {
   }
   const fillLabels = fills.map((f) => `${f.properties.p}: ${f.properties.n}`);
 
+  // The source gives Bulgaria the whole of Thrace up to the Bosphorus and draws the
+  // Ottomans only in Asia. Modern Turkey still holds the European shore, so paint that
+  // in as Ottoman Thrace: it sits on top of Bulgaria's over-reach and the capital stays.
+  if (year !== 1930 && known.has("OTT") && COUNTRY_BY_ISO3["TUR"]) {
+    const clipToBox = (pts: number[][], box: [number, number, number, number]): number[][] => {
+      const inside = [
+        (p: number[]) => p[0] >= box[0], (p: number[]) => p[0] <= box[2],
+        (p: number[]) => p[1] >= box[1], (p: number[]) => p[1] <= box[3],
+      ];
+      const cut = (a: number[], b: number[], which: number): number[] => {
+        const value = which === 0 ? box[0] : which === 1 ? box[2] : which === 2 ? box[1] : box[3];
+        const idx = which < 2 ? 0 : 1;
+        const d = b[idx] - a[idx];
+        const t = Math.abs(d) < 1e-12 ? 0 : (value - a[idx]) / d;
+        return [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
+      };
+      let ring = pts;
+      for (let which = 0; which < 4; which += 1) {
+        const outRing: number[][] = [];
+        for (let i = 0; i < ring.length; i += 1) {
+          const cur = ring[i];
+          const prev = ring[(i + ring.length - 1) % ring.length];
+          const ci = inside[which](cur);
+          const pi = inside[which](prev);
+          if (ci) {
+            if (!pi) outRing.push(cut(prev, cur, which));
+            outRing.push(cur);
+          } else if (pi) outRing.push(cut(prev, cur, which));
+        }
+        ring = outRing;
+        if (ring.length < 3) return [];
+      }
+      return ring;
+    };
+    const thrace: number[][][][] = [];
+    for (const m of modernFeatures) {
+      if (String((m.properties as Record<string, unknown> | undefined)?.name ?? "") !== "Turkey") continue;
+      const g = m.geometry as { type?: string; coordinates?: unknown } | null;
+      const polys = !g?.coordinates ? [] : g.type === "Polygon" ? [g.coordinates] : (g.coordinates as unknown[]);
+      for (const part of polys) {
+        const ring = (part as number[][][])[0] ?? [];
+        const clipped = clipToBox(ring, [25.6, 39.8, 29.3, 42.3]);
+        if (clipped.length >= 3) thrace.push([clipped]);
+      }
+    }
+    if (thrace.length) {
+      out.features.push({ type: "Feature", properties: { n: "Ottoman Empire", p: "OTT", h: COUNTRY_BY_ISO3["TUR"].numeric }, geometry: { type: "MultiPolygon", coordinates: thrace } });
+      used.set("OTT", (used.get("OTT") ?? 0) + 1);
+    }
+  }
   // Largest features first keeps labels sensible and drawing order stable.
   out.features.sort((a, b) => area(b as Feature) - area(a as Feature));
 

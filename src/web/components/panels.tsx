@@ -76,7 +76,7 @@ export function CountryPanel({ country }: { country: Country | null }) {
           <Flag c={c} size={22} />
           <div className="grow" style={{ minWidth: 0 }}>
             <h2 style={{ fontSize: 18 }} className="truncate">{c.name}</h2>
-            <div className="dim" style={{ fontSize: 11 }}>{GOVERNMENT_LABELS[c.government] ?? c.government}{c.overlord ? " · dependency" : ""}</div>
+            <div className="dim" style={{ fontSize: 11 }}>{GOVERNMENT_LABELS[c.government] ?? c.government}{c.overlord ? " · protectorate" : ""}</div>
           </div>
           {mine && <Chip tone="var(--accent-2)">You</Chip>}
           {c.wars.length > 0 && <Chip tone="var(--negative)">At war</Chip>}

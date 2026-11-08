@@ -95,4 +95,5 @@ PRY|Paraguay|PRES|15|none|0.6|0.03|President:Eduardo Schaerer
 BRA|Brazil|FR|5|none|25|1.7|President:Hermes da Fonseca
 DOM|Dominican Republic|PRES|5|none|0.7|0.02|President:Jose Bordas Valdez
 HTI|Haiti|PRES|15|none|1.8|0.05|President:Oreste Zamor
+PAN|Panama|PRES|10|none|0.4|0.04|President:Belisario Porras|-|||Liberal Party
 `) };
