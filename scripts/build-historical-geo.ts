@@ -970,6 +970,23 @@ async function build(year: Year): Promise<void> {
   // have their centroid in the sea, so a point lookup misses them.
   const nameToNumeric = new Map<string, string>();
   for (const c of Object.values(COUNTRY_BY_ISO3)) nameToNumeric.set(c.name, c.numeric);
+  // A polity drawn as fragments inside its own territory (Armenia, Georgia and
+  // Azerbaijan were all pieces of the Russian Empire) draws a modern-looking border
+  // through the middle of that empire. Keep the containing shape and drop the piece.
+  for (let i = shapes.length - 1; i >= 0; i -= 1) {
+    const shape = shapes[i];
+    const own = shape.properties.p;
+    if (!own) continue;
+    const centre = centroid(shape);
+    const sBox = bboxOf(shape.geometry);
+    const swallowed = shapes.some((other, j) => {
+      if (j === i || other.properties.p !== own) return false;
+      const oBox = bboxOf(other.geometry);
+      if (oBox[2] - oBox[0] < sBox[2] - sBox[0] || oBox[3] - oBox[1] < sBox[3] - sBox[1]) return false;
+      return pointInGeometry(other.geometry, centre);
+    });
+    if (swallowed) shapes.splice(i, 1);
+  }
   const numericToModern = new Map<string, Feature>();
   for (const m of modernFeatures) {
     const name = String((m.properties as { name?: unknown } | undefined)?.name ?? "");
@@ -1002,8 +1019,12 @@ async function build(year: Year): Promise<void> {
     let best = "";
     let bestN = 0;
     for (const [p, n] of votes) if (n > bestN) { best = p; bestN = n; }
-    if (best === expected) continue;
-    patches.push({ type: "Feature", properties: { n: expected, p: expected, h: numeric, z: 1 }, geometry: shape.geometry });
+    // Any foreign shape inside the land is enough: a Persian wedge over Georgia or
+    // a Spanish sliver over France is still a wrong border, even if the land is
+    // mostly drawn by its owner.
+    const intruder = [...votes.keys()].some((p) => p && p !== expected);
+    if (!intruder && best === expected) continue;
+    patches.push({ type: "Feature", properties: { n: expected, p: expected, h: numeric, z: 1, f: best ? 1 : 0 }, geometry: shape.geometry });
   }
   for (const p of patches) {
     out.features.push(p);
