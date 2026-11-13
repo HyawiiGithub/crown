@@ -230,6 +230,17 @@ export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Reco
       c.executive.approval = clamp(c.executive.approval + (rulesByDecree(c.government) ? 2 : -4), 0, 100);
       return { ok: true, message: war.name };
     }
+    case "set-divisions": {
+      const infantry = clamp(Number(body.infantry ?? 0.6), 0, 1);
+      const armour = clamp(Number(body.armour ?? 0.2), 0, 1);
+      const artillery = clamp(Number(body.artillery ?? 0.2), 0, 1);
+      const total = infantry + armour + artillery;
+      if (total < 0.5) return { ok: false, message: "An army needs at least some of one arm." };
+      c.military.divisions = { infantry: infantry / total, armour: armour / total, artillery: artillery / total };
+      const cost = Math.max(1e5, e.gdp * 0.002);
+      e.fiscal.debt += cost;
+      return { ok: true, message: `Army reorganised: ${Math.round((armour / total) * 100)}% armour, ${Math.round((artillery / total) * 100)}% artillery.` };
+    }
     case "naval-invasion": {
       const target = String(body.target ?? "");
       const d = world.countries[target];
@@ -250,7 +261,7 @@ export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Reco
         pushEvent(world, { kind: "military", severity: "major", country: c.id, title: `${c.name}: landing at ${place} repulsed`, body: `The convoy was turned back short of the beaches; ${(cost / 1e9).toFixed(2)}B and a division are gone.`, tags: ["war", "invasion"] });
         return { ok: false, message: `The landing at ${place} was repulsed.` };
       }
-      war.fronts.push({ id: `${war.id}-landing-${war.fronts.length}`, name: `Landing at ${place}`, belligerents: [c.id, d.id], control: clamp(2 + edge * 8, 0, 20), contestedOutput: 0, openedAt: world.t, terrain: "coastal", attritionRate: 0.0006, overseas: true });
+      war.fronts.push({ id: `${war.id}-landing-${war.fronts.length}`, name: `Landing at ${place}`, belligerents: [c.id, d.id], control: clamp(2 + edge * 8, 0, 20), contestedOutput: 0, openedAt: world.t, terrain: "coastal", attritionRate: 0.0006, overseas: true, theatre: d.id, axis: d.lon !== undefined && d.lat !== undefined ? [d.lon - 2, d.lat, d.lon + 2, d.lat] : undefined });
       c.military.readiness = clamp(c.military.readiness + 3, 0, 100);
       pushEvent(world, { kind: "military", severity: "catastrophic", country: c.id, title: `${c.name} lands at ${place}`, body: `A beachhead is open on the coast of ${d.name}. Cost so far ${(cost / 1e9).toFixed(2)}B.`, tags: ["war", "invasion"] });
       return { ok: true, message: `Beachhead established at ${place}.` };

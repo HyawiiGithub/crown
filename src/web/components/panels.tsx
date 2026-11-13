@@ -910,7 +910,21 @@ function Military({ c, mine }: { c: Country; mine: boolean }) {
       </div>
       <div className="card">
         <div className="row"><strong className="grow">Research</strong><span className="dim mono">{Math.round(c.tech?.points ?? 0)} pts</span></div>
-        {(["army", "logistics", "industry", "navy"] as const).map((f) => (
+              {mine && (
+        <div className="card" style={{ display: "grid", gap: 4 }}>
+          <strong style={{ fontSize: 12 }}>Army composition</strong>
+          <div className="mono dim" style={{ fontSize: 11 }}>
+            infantry {Math.round(((c.military.divisions?.infantry ?? 0.6)) * 100)}% · armour {Math.round(((c.military.divisions?.armour ?? 0.2)) * 100)}% · artillery {Math.round(((c.military.divisions?.artillery ?? 0.2)) * 100)}%
+          </div>
+          <div className="row row--wrap" style={{ gap: 4 }}>
+            <button className="btn btn--sm" onClick={() => void act({ type: "set-divisions", infantry: 0.7, armour: 0.15, artillery: 0.15 })}>Infantry army</button>
+            <button className="btn btn--sm" onClick={() => void act({ type: "set-divisions", infantry: 0.4, armour: 0.4, artillery: 0.2 })}>Armoured army</button>
+            <button className="btn btn--sm" onClick={() => void act({ type: "set-divisions", infantry: 0.35, armour: 0.2, artillery: 0.45 })}>Artillery army</button>
+            <button className="btn btn--sm" onClick={() => void act({ type: "set-divisions", infantry: 0.6, armour: 0.2, artillery: 0.2 })}>Balanced</button>
+          </div>
+        </div>
+      )}
+{(["army", "logistics", "industry", "navy"] as const).map((f) => (
           <div key={f} className="row" style={{ fontSize: 12, padding: "2px 0" }}>
             <span className="grow" style={{ textTransform: "capitalize" }}>{f}</span>
             <span className="mono">{c.tech?.[f] ?? 0}</span>
@@ -1150,6 +1164,14 @@ export function WarPanel({ wars, countries, onPick }: { wars: War[]; countries: 
         <div key={w.id} className="card" style={{ marginBottom: 10 }}>
           <strong>{w.name}</strong>
           <div className="dim" style={{ fontSize: 11.5, margin: "4px 0 8px" }}>{w.cause}</div>
+          {w.aims && w.aims.length > 0 && (
+            <div style={{ display: "grid", gap: 2, marginBottom: 8 }}>
+              <span className="mono dim" style={{ fontSize: 10.5, letterSpacing: ".08em" }}>WAR AIMS</span>
+              {w.aims.map((aim, i) => (
+                <span key={i} className="dim" style={{ fontSize: 11 }}>{name(w, aim.holder)}: {aim.label}</span>
+              ))}
+            </div>
+          )}
           {Object.keys(w.belligerents).map((s) => (
             <div key={s} className="row" style={{ justifyContent: "space-between", fontSize: 11.5, cursor: countries[s] ? "pointer" : undefined }} onClick={() => countries[s] && onPick(s)}>
               <span className="truncate">{name(w, s)}</span>

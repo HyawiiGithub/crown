@@ -143,7 +143,9 @@ export function stepWars(world: World, rnd: Rng, dt: number): void {
       const perSoldier = c.economy.fiscal.military / Math.max(1, c.military.activeDuty);
       const worldPc = world.globals.globalGdp / Math.max(1, world.globals.globalPopulation);
       const equipment = clamp(Math.pow(perSoldier / Math.max(1e-6, worldPc * 4), 0.25), 0.55, 1.8) * equipmentBonus(c);
-      const own = c.military.activeDuty * (0.4 + Math.max(15, c.military.readiness) / 100) * (Math.max(15, c.military.morale) / 100) * equipment;
+      const mix = c.military.divisions ?? { infantry: 0.6, armour: 0.2, artillery: 0.2 };
+      const mixBonus = 1 + (mix.armour - 0.2) * 0.4 + (mix.artillery - 0.2) * 0.2;
+      const own = c.military.activeDuty * (0.4 + Math.max(15, c.military.readiness) / 100) * (Math.max(15, c.military.morale) / 100) * equipment * mixBonus;
       // Friends overseas send aid and expeditions, not their whole army.
       strength[b] = own + allyPower * 0.3;
     }
@@ -403,12 +405,17 @@ export function declareWar(world: World, attacker: string, defender: string, cau
     belligerents: { [attacker]: [] as string[], [defender]: [] as string[] },
     cause,
     fronts: [overseasInvasion
-      ? { id: `${id}-f0`, name: `${a.name} landings in ${d.name}`, belligerents: [attacker, defender], control: navalPower(a) >= navalPower(d) * 0.5 ? 1 : 0, contestedOutput: 0, openedAt: world.t, terrain: "coastal", attritionRate: 0.0004, overseas: true }
+      ? { id: `${id}-f0`, name: `${a.name} landings in ${d.name}`, belligerents: [attacker, defender], control: navalPower(a) >= navalPower(d) * 0.5 ? 1 : 0, contestedOutput: 0, openedAt: world.t, terrain: "coastal", attritionRate: 0.0004, overseas: true, theatre: defender, axis: d.lon !== undefined && d.lat !== undefined ? [d.lon - 3, d.lat, d.lon + 3, d.lat] : undefined }
       : { id: `${id}-f0`, name: `${a.name} - ${d.name} Front`, belligerents: [attacker, defender], control: 0, contestedOutput: 0, openedAt: world.t, terrain: "plains", attritionRate: 0.0004 }],
     exhaustion: { [attacker]: 4, [defender]: 4 },
     casualties: {},
     materiel: {},
     warGoal: cause,
+    aims: [
+      { holder: attacker, kind: "land", label: `Annex ${d.lands?.[0] ?? d.name}`, target: d.lands?.[0] ?? d.id },
+      { holder: attacker, kind: "reparations", label: `Indemnity from ${d.name}` },
+      { holder: defender, kind: "reparations", label: `Reparations from ${a.name}` },
+    ],
     publicSupport: { [attacker]: 62, [defender]: 70 },
   };
   world.wars[id] = war;

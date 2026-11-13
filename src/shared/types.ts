@@ -907,6 +907,8 @@ export interface TechState {
 }
 
 export interface MilitaryState {
+  /** Share of the army in each arm; sums to 1. */
+  divisions?: { infantry: number; armour: number; artillery: number };
   activeDuty: number;
   reserves: number;
   /** Annual military spend, credits. */
@@ -981,6 +983,8 @@ export interface War {
   /** ISO3 -> captured equipment value. */
   materiel: Record<string, number>;
   warGoal: string;
+  /** What each belligerent says it is fighting for. */
+  aims?: { holder: string; kind: "land" | "reparations" | "vassal"; label: string; target?: string }[];
   /** 0..100 public support for the war, by country. */
   publicSupport: Record<string, number>;
   /** Set when a white peace or victory has been agreed. */
