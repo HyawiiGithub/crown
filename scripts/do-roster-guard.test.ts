@@ -107,6 +107,28 @@ async function main(): Promise<void> {
   check("the company without a country is registered in the seat", Object.values(w.companies).some((c: any) => c.name === "Seat Holdings" && c.country === "FRA"), Object.values(w.companies).filter((c: any) => c.name === "Seat Holdings").map((c: any) => c.country).join(","));
   check("the politician without a country was created in the seat", Object.values(w.characters).some((c: any) => c.userId === "u1" && c.country === "FRA"), Object.values(w.characters).filter((c: any) => c.userId === "u1").map((c: any) => c.country).join(","));
   check("nothing landed in the nations the caller named and did not hold", !Object.values(w.bills).some((b: any) => b.title === "Seat Bill" && b.country !== "FRA"), Object.values(w.bills).map((b: any) => b.country).join(","));
+
+  // --- a member with no seat cannot act for a country named or implied ---
+  const SEATLESS: [string, Record<string, unknown>][] = [
+    ["introduce-bill", { title: "Seatless Bill", summary: "", body: "", category: "ordinary" }],
+    ["raise-referendum", { question: "Seatless referendum?" }],
+    ["found-company", { name: "Seatless Holdings" }],
+    ["create-politician", { name: "Seatless Candidate" }],
+    ["run-for-office", { office: "chamber" }],
+    ["appoint-minister", { area: "finance", characterId: "nobody" }],
+  ];
+  for (const [type, payload] of SEATLESS) {
+    const held = await (await act({ type, userId: "u3", country: "ESP", ...payload })).json();
+    check(`${type} refuses a seatless member naming another member's nation`, held.ok === false && /held by another member/.test(String(held.message)), String(held.message));
+    const free = await (await act({ type, userId: "u3", country: "NLD", ...payload })).json();
+    check(`${type} refuses a seatless member naming a nation nobody holds`, free.ok === false && /Claim a country/.test(String(free.message)), String(free.message));
+    const unnamed = await (await act({ type, userId: "u3", ...payload })).json();
+    check(`${type} refuses a seatless member naming no nation`, unnamed.ok === false && /Claim a country/.test(String(unnamed.message)), String(unnamed.message));
+  }
+
+  const after = await (await object.fetch(new Request("https://do/snapshot?worldId=1900%3Aguard"))).json();
+  const afterWorld = after.world ?? after;
+  check("a seatless member filed no bill, company, politician or referendum", !Object.values(afterWorld.bills).some((b: any) => b.title === "Seatless Bill") && !Object.values(afterWorld.companies).some((c: any) => c.name === "Seatless Holdings") && !Object.values(afterWorld.characters).some((c: any) => c.userId === "u3"), `${Object.keys(afterWorld.bills).length} bills, ${Object.keys(afterWorld.companies).length} companies`);
 }
 
 main()

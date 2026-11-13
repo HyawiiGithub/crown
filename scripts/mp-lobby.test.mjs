@@ -296,6 +296,38 @@ async function main() {
   });
   check("a member with no country is refused a country lever", seatless.body.ok === false && /Claim a country/.test(String(seatless.body.message)), JSON.stringify(seatless.body));
 
+  // --- a seatless member is refused every country-naming action ---
+  const wideWorld = (await json(`/api/worlds/${WIDE_WORLD}/snapshot`)).body.world;
+  const wideFree = Object.keys(wideWorld?.countries ?? {}).find((iso) => !Object.values(wideWorld?.seats ?? {}).includes(iso)) ?? "NLD";
+  for (const [type, payload] of [
+    ["introduce-bill", { title: "Seatless Bill", summary: "", body: "", category: "ordinary" }],
+    ["raise-referendum", { question: "Seatless referendum?" }],
+    ["create-politician", { name: "Seatless Candidate" }],
+    ["run-for-office", { office: "chamber" }],
+    ["appoint-minister", { area: "finance", characterId: "nobody" }],
+  ]) {
+    const named = await json(`/api/worlds/${WIDE_WORLD}/action`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: capped[2].cookie },
+      body: JSON.stringify({ type, country: wideFree, ...payload }),
+    });
+    check(`${type} refuses a seatless member naming a nation`, named.body.ok === false && /Claim a country/.test(String(named.body.message)), JSON.stringify(named.body));
+    const unnamed = await json(`/api/worlds/${WIDE_WORLD}/action`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: capped[2].cookie },
+      body: JSON.stringify({ type, ...payload }),
+    });
+    check(`${type} refuses a seatless member naming no nation`, unnamed.body.ok === false && /Claim a country/.test(String(unnamed.body.message)), JSON.stringify(unnamed.body));
+  }
+  const seatlessCompany = await json(`/api/worlds/${WIDE_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: capped[2].cookie },
+    body: JSON.stringify({ type: "found-company", name: "Seatless Holdings" }),
+  });
+  check("found-company stops a player before the seat is even read", seatlessCompany.status === 403 && /company.create/.test(JSON.stringify(seatlessCompany.body)), `status ${seatlessCompany.status} ${JSON.stringify(seatlessCompany.body)}`);
+  const seatlessWorld = (await json(`/api/worlds/${WIDE_WORLD}/snapshot`)).body.world;
+  check("the seatless member filed nothing in that world", !Object.values(seatlessWorld.bills ?? {}).some((b) => b.title === "Seatless Bill") && !Object.values(seatlessWorld.characters ?? {}).some((c) => c.userId === capped[2].id), Object.values(seatlessWorld.bills ?? {}).map((b) => `${b.title}@${b.country}`).join(","));
+
   // --- a world command uses the same seat ---
   const barrier = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
     method: "POST",
