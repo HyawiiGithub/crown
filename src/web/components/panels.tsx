@@ -895,18 +895,24 @@ function Foreign({ c, mine }: { c: Country; mine: boolean }) {
 
 function Military({ c, mine }: { c: Country; mine: boolean }) {
   const countries = useStore((s) => s.countries);
-  const [opsTarget, setOpsTarget] = useState("");
-  const [landing, setLanding] = useState("");
+  const opsPick = useStore((s) => s.opsPick);
+  const stored = useStore((s) => s.opsTarget);
+  const landing = useStore((s) => s.opsLanding);
+  const opsTarget = stored && stored !== c.id ? stored : "";
   const pick = opsTarget || (Object.values(countries).find((x) => x.id !== c.id && !x.annexedBy)?.id ?? "");
   const m = c.military;
   return (
     <div className="stack">
       <div className="card" style={{ display: "grid", gap: 6 }}>
         <strong style={{ fontSize: 12 }}>Operations</strong>
-        <select className="input" value={pick} onChange={(e) => setOpsTarget(e.target.value)}>
+        <select className="input" value={pick} onChange={(e) => useStore.getState().set({ opsTarget: e.target.value })}>
           {Object.values(countries).filter((x) => x.id !== c.id && !x.annexedBy).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
         </select>
-        <input className="input" value={landing} onChange={(e) => setLanding(e.target.value)} placeholder="Landing site, e.g. Normandy" />
+        <button
+          className={opsPick ? "btn btn--sm btn--primary" : "btn btn--sm"}
+          onClick={() => useStore.getState().set({ opsPick: opsPick ? null : "target" })}
+        >{opsPick ? "Click a country… (Esc)" : "Pick target on map"}</button>
+        <input className="input" value={landing} onChange={(e) => useStore.getState().set({ opsLanding: e.target.value })} placeholder="Landing site, e.g. Normandy" />
         <div className="row row--wrap" style={{ gap: 4 }}>
           <button className="btn btn--sm btn--primary" onClick={() => void act({ type: "naval-invasion", target: pick, place: landing })}>Naval invasion</button>
           <button className="btn btn--sm" onClick={() => void act({ type: "special-op", target: pick, op: "sabotage" })}>Sabotage</button>

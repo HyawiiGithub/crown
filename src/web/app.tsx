@@ -251,7 +251,28 @@ function WorldShell() {
   const directives: WorldDirective[] = s.directives;
   const growth = avgGrowth();
 
-  const pick = (id: string) => s.set({ selected: id, rightTab: id === s.playerCountry ? "government" : "country" });
+  const pick = (id: string) => {
+    if (useStore.getState().opsPick) {
+      const name = useStore.getState().countries[id]?.name ?? id;
+      useStore.getState().set({ opsPick: null, opsTarget: id });
+      useStore.getState().toast(`Operation target: ${name}`, "ok");
+      return;
+    }
+    s.set({ selected: id, rightTab: id === s.playerCountry ? "government" : "country" });
+  };
+  // Escape backs out of a map target selection.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const st = useStore.getState();
+      if (!st.opsPick) return;
+      st.set({ opsPick: null });
+      st.toast("Target selection cancelled.");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // On phones only one of map, news and country is on screen at a time.
   const [mobileView, setMobileView] = useState<"map" | "news" | "country">("map");
 
@@ -330,6 +351,22 @@ function WorldShell() {
           focus={s.selected ? { iso3: s.selected, relations: s.countries[s.selected]?.relations } : null}
           theme={theme}
         />
+        {s.opsPick && (
+          <div
+            role="status"
+            style={{
+              position: "absolute", top: 12, left: "50%", transform: "translateX(-50%)",
+              zIndex: 20, display: "flex", alignItems: "center", gap: 10,
+              padding: "8px 12px", borderRadius: 8, background: "var(--surface)",
+              border: "1px solid var(--accent-2)", boxShadow: "0 6px 24px rgba(0,0,0,.28)",
+              maxWidth: "min(520px, 90vw)",
+            }}
+          >
+            <span aria-hidden="true">🎯</span>
+            <span style={{ fontSize: 12.5 }}><strong>Selecting an operation target.</strong> Click a country on the map. Press Esc to back out.</span>
+            <button className="btn btn--sm" onClick={() => useStore.getState().set({ opsPick: null })}>Cancel (Esc)</button>
+          </div>
+        )}
         {selected && (
           <button className="btn mobile-chip" onClick={() => setMobileView("country")}>{selected.name} details</button>
         )}

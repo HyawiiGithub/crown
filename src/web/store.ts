@@ -121,6 +121,12 @@ interface Store {
   peaceDrawing: string | null;
   peaceDrawn: { ring: [number, number][]; share: number; territory: string } | null;
   notice: { text: string; kind: "ok" | "err" } | null;
+  /** Set while the player is choosing an operations target on the map. */
+  opsPick: string | null;
+  /** Country chosen for the next operation. */
+  opsTarget: string | null;
+  /** Landing site text for a naval invasion. */
+  opsLanding: string;
 
   set: (p: Partial<Store>) => void;
   loadBootstrap: () => Promise<void>;
@@ -164,6 +170,9 @@ const worldInitial = {
   peaceWar: null as string | null,
   peaceDrawing: null as string | null,
   peaceDrawn: null as { ring: [number, number][]; share: number; territory: string } | null,
+  opsPick: null as string | null,
+  opsTarget: null as string | null,
+  opsLanding: "",
 };
 
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
