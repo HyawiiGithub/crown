@@ -1233,8 +1233,11 @@ export function EventPopup() {
   const [dismissed, setDismissed] = useState<Record<string, true>>({});
   const queue = events
     .filter((e) => (e.severity === "catastrophic" || e.severity === "major") && !dismissed[e.id])
-    .slice(-3)
-    .reverse();
+    .slice(-8)
+    .reverse()
+    // One card per story: a collapsing state fires the same headline repeatedly.
+    .filter((e, i, all) => all.findIndex((x) => x.title === e.title) === i)
+    .slice(0, 2);
   if (!queue.length) return null;
   return (
     <div style={{ position: "fixed", top: 64, right: 16, zIndex: 25, display: "grid", gap: 8, width: "min(400px, 92vw)" }}>

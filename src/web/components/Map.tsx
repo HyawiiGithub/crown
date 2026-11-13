@@ -444,7 +444,7 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
   const [draft, setDraft] = useState<[number, number][]>([]);
   const mapPoint = (e: React.PointerEvent): [number, number] => {
     const rect = wrapRef.current!.getBoundingClientRect();
-    return [(e.clientX - rect.left - transform.x) / transform.k, (e.clientY - rect.top - transform.y) / transform.k];
+    return snapPoint([(e.clientX - rect.left - transform.x) / transform.k, (e.clientY - rect.top - transform.y) / transform.k]);
   };
   const finishDrawing = () => {
     const territory = useStore.getState().peaceDrawing;
@@ -462,6 +462,45 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
     store.set({ peaceDrawing: null, peaceDrawn: { ring, share, territory } });
   };
 
+  // Border vertices of the territory being drawn around, so outlines can follow
+  // its real edge instead of the loose path of the pointer.
+  const snapVerts = useMemo(() => {
+    if (!drawingFor || !raw) return [] as [number, number][];
+    const out: [number, number][] = [];
+    for (const f of raw) {
+      if (control[featureKey(f)] !== drawingFor) continue;
+      const g = f.geometry as { type?: string; coordinates?: unknown } | undefined;
+      if (g?.type === "Polygon") for (const ring of g.coordinates as number[][][]) for (const p of ring) out.push([p[0], p[1]]);
+      else if (g?.type === "MultiPolygon") for (const poly of g.coordinates as number[][][][]) for (const ring of poly) for (const p of ring) out.push([p[0], p[1]]);
+    }
+    return out;
+  }, [drawingFor, raw, control]);
+
+  const snapPoint = (pt: [number, number]): [number, number] => {
+    if (!snapVerts.length) return pt;
+    const limit = 12 / Math.max(0.2, transform.k);
+    let best = pt;
+    let bestD = limit;
+    for (const v of snapVerts) {
+      const p = projection(v);
+      if (!p) continue;
+      const d = Math.hypot(p[0] - pt[0], p[1] - pt[1]);
+      if (d < bestD) { bestD = d; best = [p[0], p[1]]; }
+    }
+    return best;
+  };
+
+  useEffect(() => {
+    if (!drawingFor) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        setDraft((d) => d.slice(0, -1));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawingFor]);
   const onPointerDown = (e: React.PointerEvent) => {
     if (drawingFor) {
       setDraft([mapPoint(e)]);
@@ -647,6 +686,8 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
       {drawingFor && (
         <div className="draw-banner card">
           <span className="grow">Draw around the land you want from {countries[drawingFor]?.name}. Zoom first with + and &minus;.</span>
+          <button className="btn btn--sm" onPointerDown={(e) => e.stopPropagation()} onClick={() => setDraft((d) => d.slice(0, -1))} disabled={!draft.length}>Undo point</button>
+          <button className="btn btn--sm" onPointerDown={(e) => e.stopPropagation()} onClick={() => setDraft([])} disabled={!draft.length}>Clear</button>
           <button className="btn btn--sm" onPointerDown={(e) => e.stopPropagation()} onClick={() => useStore.getState().set({ peaceDrawing: null })}>Cancel</button>
         </div>
       )}

@@ -13,15 +13,18 @@ import { clamp01, type Rng } from "./rng";
 
 /** What each industry buys from upstream, as a share of its revenue. */
 export const SUPPLY: Partial<Record<SectorId, { input: SectorId; ratio: number }[]>> = {
-  manufacturing: [{ input: "mining", ratio: 0.3 }, { input: "agriculture", ratio: 0.15 }],
-  construction: [{ input: "mining", ratio: 0.3 }],
+  manufacturing: [{ input: "mining", ratio: 0.3 }, { input: "agriculture", ratio: 0.15 }, { input: "energy", ratio: 0.1 }],
+  construction: [{ input: "mining", ratio: 0.3 }, { input: "manufacturing", ratio: 0.15 }],
   energy: [{ input: "mining", ratio: 0.5 }],
-  utilities: [{ input: "energy", ratio: 0.3 }],
-  transport: [{ input: "energy", ratio: 0.25 }],
-  retail: [{ input: "manufacturing", ratio: 0.4 }, { input: "agriculture", ratio: 0.2 }],
+  utilities: [{ input: "energy", ratio: 0.3 }, { input: "manufacturing", ratio: 0.05 }],
+  transport: [{ input: "energy", ratio: 0.25 }, { input: "manufacturing", ratio: 0.1 }],
+  retail: [{ input: "manufacturing", ratio: 0.4 }, { input: "agriculture", ratio: 0.2 }, { input: "transport", ratio: 0.05 }],
   technology: [{ input: "manufacturing", ratio: 0.25 }],
   healthcare: [{ input: "manufacturing", ratio: 0.1 }],
   media: [{ input: "manufacturing", ratio: 0.05 }],
+  defence: [{ input: "mining", ratio: 0.2 }, { input: "manufacturing", ratio: 0.2 }],
+  telecom: [{ input: "manufacturing", ratio: 0.15 }],
+  tourism: [{ input: "transport", ratio: 0.1 }],
 };
 
 const PREFIX: Record<string, string[]> = {
