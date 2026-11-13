@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { User, WorldDirective } from "../shared/types";
 import { WorldMap, type MapLayer } from "./components/Map";
-import { CountryPanel, MarketPanel, PeaceDeal, RankingPanel, WarPanel } from "./components/panels";
+import { CountryPanel, MarketPanel, PeaceDeal, RankingPanel, VoteTray, WarPanel } from "./components/panels";
 import { DevMenu } from "./components/DevMenu";
 import { TickerList, Lobby } from "./components/Lobby";
 import { applyTheme, themeFromScenario, type Theme } from "./theme";
@@ -217,6 +217,7 @@ function DiscordMark() {
 // ===========================================================================
 
 const SPEEDS: { value: number; label: string; title: string }[] = [
+  { value: 0.5, label: "0.5", title: "Half a day per second" },
   { value: 1, label: "1", title: "1 day per second" },
   { value: 3, label: "3", title: "3 days per second" },
   { value: 7, label: "7", title: "1 week per second" },
@@ -343,6 +344,7 @@ function WorldShell() {
       </aside>
 
       <PeaceDeal />
+      <VoteTray />
 
       <nav className="mobile-nav" aria-label="Game views">
         {([["map", "Map"], ["news", "News"], ["country", "Country"]] as const).map(([id, label]) => (

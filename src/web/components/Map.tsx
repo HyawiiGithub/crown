@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { geoNaturalEarth1, geoGraticule10, geoPath, type GeoPath, type GeoProjection } from "d3-geo";
+import { geoMercator, geoGraticule10, geoPath, type GeoPath, type GeoProjection } from "d3-geo";
 import { feature } from "topojson-client";
 import type { Topology } from "topojson-specification";
 import type { Country, Front, MapRegion, War } from "../../shared/types";
@@ -162,7 +162,7 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
   }, [historicalActive, theme.id]);
 
   // ---- geometry, one projection for everything ----------------------------
-  const projection = useMemo(() => geoNaturalEarth1().fitExtent([[6, 6], [size.w - 6, size.h - 6]], { type: "Sphere" } as never), [size.w, size.h]);
+  const projection = useMemo(() => geoMercator().fitExtent([[6, 6], [size.w - 6, size.h - 6]], { type: "Sphere" } as never), [size.w, size.h]);
   const pathGen = useMemo<GeoPath>(() => geoPath(projection), [projection]);
 
   const drawn = useMemo<Drawn[]>(() => {

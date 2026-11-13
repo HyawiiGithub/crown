@@ -14,12 +14,42 @@ import { Bar, Chip, DataTable, Empty, Panel, Spark, Stat, Tabs } from "./primiti
 // ===========================================================================
 
 export function Flag({ c, size = 18 }: { c: Pick<Country, "id" | "mapColor" | "name">; size?: number }) {
-  const year = useStore((s) => s.scenario?.year ?? 2026);
   const iso2 = COUNTRY_BY_ISO3[c.id]?.iso2;
-  if (year >= 2010 && iso2) {
+  if (iso2) {
     return <img src={`https://flagcdn.com/w40/${iso2.toLowerCase()}.png`} alt="" width={size * 1.4} height={size} style={{ objectFit: "cover", borderRadius: 2, flex: "none" }} onError={(e) => ((e.target as HTMLImageElement).style.display = "none")} />;
   }
   return <span aria-hidden style={{ width: size * 1.4, height: size, background: c.mapColor, borderRadius: 2, flex: "none", display: "inline-block", border: "1px solid var(--rule)" }} />;
+}
+
+const BILL_SETTLED = new Set(["enacted", "rejected", "expired"]);
+
+/** The floor of every legislature you can see, updating as the vote comes in. */
+export function VoteTray() {
+  const bills = useStore((s) => s.bills);
+  const countries = useStore((s) => s.countries);
+  const [hidden, setHidden] = useState<Record<string, true>>({});
+  const live = useMemo(() => Object.values(bills).filter((b) => !BILL_SETTLED.has(b.status) && !hidden[b.id]), [bills, hidden]);
+  if (!live.length) return null;
+  return (
+    <div className="card" style={{ position: "fixed", left: 16, bottom: 16, zIndex: 260, width: 330, display: "grid", gap: 10, maxHeight: "46vh", overflow: "auto" }}>
+      <div className="row"><strong className="grow">On the floor</strong><span className="dim" style={{ fontSize: 11 }}>{live.length} bill{live.length === 1 ? "" : "s"}</span></div>
+      {live.slice(0, 5).map((b) => {
+        const t = Object.values(b.tallies)[0];
+        const total = t ? t.aye + t.nay + t.abstain + t.absent : 0;
+        return (
+          <div key={b.id} style={{ display: "grid", gap: 4 }}>
+            <div className="row" style={{ gap: 6 }}>
+              <strong className="grow truncate" style={{ fontSize: 12 }}>{b.title}</strong>
+              <button className="btn btn--sm" title="Dismiss" onClick={() => setHidden((h) => ({ ...h, [b.id]: true }))}>&times;</button>
+            </div>
+            <div className="dim" style={{ fontSize: 11 }}>{countries[b.country]?.name ?? b.country} · {b.status}</div>
+            <Bar value={total ? t.aye / total : 0} />
+            <div className="mono dim" style={{ fontSize: 11 }}>{t ? `${t.aye} aye · ${t.nay} nay · ${t.abstain} abstain` : "awaiting a division"}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function charName(characters: Record<string, Character>, id?: string): string {
