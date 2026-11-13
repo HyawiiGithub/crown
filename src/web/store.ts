@@ -138,8 +138,6 @@ interface Store {
   toast: (text: string, kind?: "ok" | "err") => void;
 }
 
-const CLEAR_OPS = { opsPick: null as string | null, opsTarget: null as string | null, opsLanding: "" };
-
 const worldInitial = {
   worldId: null as string | null,
   scenario: null as Store["scenario"],
@@ -206,13 +204,13 @@ export const useStore = create<Store>((set, get) => ({
     set({ saves: r.saves ?? [] });
   },
   startGame: async (scenarioId, country, name) => {
-    set({ ...worldInitial, ...CLEAR_OPS, connection: "connecting" });
+    set({ ...worldInitial, connection: "connecting" });
     const r = await call<{ ok: boolean; message?: string; world: World }>({ kind: "new-game", scenarioId, country, name });
     if (!r.ok) throw new Error(r.message ?? "Could not start the game");
     adoptWorld(r.world);
   },
   loadGame: async (saveId) => {
-    set({ ...worldInitial, ...CLEAR_OPS, connection: "connecting" });
+    set({ ...worldInitial, connection: "connecting" });
     const r = await call<{ ok: boolean; message?: string; world: World }>({ kind: "load", saveId });
     if (!r.ok) {
       set({ connection: "idle" });
@@ -222,7 +220,7 @@ export const useStore = create<Store>((set, get) => ({
   },
   leaveWorld: async () => {
     await call({ kind: "leave" });
-    set({ ...worldInitial, ...CLEAR_OPS });
+    set({ ...worldInitial });
     await get().refreshSaves();
   },
 }));
