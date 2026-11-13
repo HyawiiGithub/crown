@@ -4,6 +4,7 @@ import { pushEvent, spawnPolity } from "./bootstrap";
 import { frontOccupation } from "./occupation";
 import { LAND_BORDERS } from "../data/borders";
 import { Rng, approach, clamp, clamp01 } from "./rng";
+import { isPlayerCountry, playerCountries } from "./seats";
 import { terrainOf } from "./terrain";
 import { SECONDS_PER_YEAR } from "./step-economy";
 
@@ -60,9 +61,9 @@ export function stepDiplomacy(world: World, rnd: Rng, dt: number): void {
     }
 
     // Unilateral embargoes form when relations are bad enough and power aligns.
-    if (!ca.overlord && a !== world.playerCountry && rnd.chance(0.0000005 * world.params.eventRate * (dt / 86400) * 60)) {
+    if (!ca.overlord && !isPlayerCountry(world, a) && rnd.chance(0.0000005 * world.params.eventRate * (dt / 86400) * 60)) {
       const target = Object.entries(ca.relations)
-        .filter(([b]) => !ca.alliances.includes(b) && b !== world.playerCountry)
+        .filter(([b]) => !ca.alliances.includes(b) && !isPlayerCountry(world, b))
         .sort((x, y) => x[1] - y[1])[0];
       if (target && target[1] < -55) {
         imposeSanction(world, a, target[0], "financial", rnd);
@@ -70,7 +71,7 @@ export function stepDiplomacy(world: World, rnd: Rng, dt: number): void {
     }
 
     // Alliance offers to states we like and who do not already have one.
-    if (a !== world.playerCountry && !ca.alliances.length && rnd.chance(0.0000005 * world.params.eventRate * (dt / 86400) * 60)) {
+    if (!isPlayerCountry(world, a) && !ca.alliances.length && rnd.chance(0.0000005 * world.params.eventRate * (dt / 86400) * 60)) {
       const friend = Object.entries(ca.relations).sort((x, y) => y[1] - x[1])[0];
       if (friend && friend[1] > 70) {
         signTreaty(world, "alliance", [a, friend[0]], ["Mutual defence"], rnd, ca.economy.gdp * 0.002);
@@ -246,8 +247,8 @@ export function stepWars(world: World, rnd: Rng, dt: number): void {
     war.phase = nextPhase(war, avgExhaustion, decidedFronts.length);
 
     // A spent AI state sues for peace. The player decides for themselves.
-    const collapsed = fighting.some((b) => b !== world.playerCountry && (war.exhaustion[b] ?? 0) >= 100);
-    const playerInvolved = Boolean(world.playerCountry && war.belligerents[world.playerCountry]);
+    const collapsed = fighting.some((b) => !isPlayerCountry(world, b) && (war.exhaustion[b] ?? 0) >= 100);
+    const playerInvolved = playerCountries(world).some((iso) => Boolean(war.belligerents[iso]));
     if (!playerInvolved && (avgExhaustion > 82 || collapsed || war.fronts.every((f) => Math.abs(f.control) > 96))) {
       concludeWar(world, war, rnd);
     }
@@ -372,7 +373,7 @@ export function joinWar(world: World, warId: string, joiner: string, side: strin
   const war = world.wars[warId];
   const c = world.countries[joiner];
   // Nobody drags the player into a war; that stays the player's decision.
-  if (!war || !c || war.endedAt || war.belligerents[joiner] || joiner === world.playerCountry) return;
+  if (!war || !c || war.endedAt || war.belligerents[joiner] || isPlayerCountry(world, joiner)) return;
   war.belligerents[joiner] = [];
   war.exhaustion[joiner] = 2;
   war.publicSupport[joiner] = 62;
@@ -442,7 +443,7 @@ export function declareWar(world: World, attacker: string, defender: string, cau
     if (!t.active || (t.kind !== "alliance" && t.kind !== "defensive-pact")) continue;
     if (!t.parties.includes(defender) || t.parties.includes(attacker)) continue;
     for (const p of t.parties) {
-      if (p === defender || p === world.playerCountry || !world.countries[p] || war.belligerents[p]) continue;
+      if (p === defender || isPlayerCountry(world, p) || !world.countries[p] || war.belligerents[p]) continue;
       joinWar(world, id, p, defender);
     }
   }
@@ -487,7 +488,7 @@ function concludeWar(world: World, war: War, rnd: Rng): void {
     const o = frontOccupation(war, f, world.countries);
     return o && o.territory === loser && o.holder === winner ? o.share : 0;
   }));
-  if (heldOfLoser >= 0.8 && wc && lc && lc.id !== world.playerCountry) {
+  if (heldOfLoser >= 0.8 && wc && lc && !isPlayerCountry(world, lc.id)) {
     annex(world, winner, loser, "Territorial concession at the end of the war");
     terms.push(`${lc?.name} is annexed in its entirety`);
   } else if (wc && lc) {

@@ -21,7 +21,7 @@
     "deploy:pages": "npm run build:web && wrangler pages deploy dist --project-name crown",
     "test:mp": "node scripts/mp-lobby.test.mjs && tsx scripts/do-roster-guard.test.ts",
 
-    "test:sim": "tsx scripts/determinism.test.ts"
+    "test:sim": "tsx scripts/determinism.test.ts && tsx scripts/seats.test.ts"
   },
   "dependencies": {
     "d3-geo": "^3.1.1",

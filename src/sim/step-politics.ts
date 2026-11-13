@@ -1,6 +1,7 @@
 import type { Bill, Character, Country, PolicyPatch, Region, SectorId, World } from "../shared/types";
 import { isDemocratic, pushEvent, rulesByDecree } from "./bootstrap";
 import { Rng, approach, clamp, clamp01 } from "./rng";
+import { isPlayerCountry } from "./seats";
 import { SECONDS_PER_YEAR } from "./step-economy";
 
 /**
@@ -280,7 +281,7 @@ function holdElection(world: World, c: Country, rnd: Rng): void {
 }
 
 function isNotable(world: World, c: Country): boolean {
-  return c.id === world.playerCountry || c.economy.gdp / Math.max(1, world.globals.globalGdp) > 0.006;
+  return isPlayerCountry(world, c.id) || c.economy.gdp / Math.max(1, world.globals.globalGdp) > 0.006;
 }
 
 function installLeader(world: World, c: Country, partyId: string, rnd: Rng): Character {
@@ -336,7 +337,7 @@ function stepUnrest(world: World, c: Country, rnd: Rng): void {
       : rnd.weighted(["protest", "strike", "riot"] as const, (k) => (k === "protest" ? 4 : 2));
     c.unrest.push({ id: `unrest-${c.id}-${world.dayCount}`, kind, intensity: rnd.float(15, 55), startedAt: world.t, fatalities: 0 });
     const label: Record<string, string> = { protest: "mass protests", riot: "rioting", strike: "a general strike", rebellion: "armed rebellion", coup: "an attempted coup" };
-    const majorState = e.gdp / Math.max(1, world.globals.globalGdp) > 0.003 || c.id === world.playerCountry;
+    const majorState = e.gdp / Math.max(1, world.globals.globalGdp) > 0.003 || isPlayerCountry(world, c.id);
     if (majorState || kind === "coup" || kind === "rebellion") {
       pushEvent(world, { kind: "social", severity: kind === "coup" || kind === "rebellion" ? "catastrophic" : "major", country: c.id, title: `${c.name}: ${label[kind]}`, body: unrestBody(kind, c), tags: ["unrest", kind] });
     }

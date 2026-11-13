@@ -1,6 +1,7 @@
 import type { World } from "../shared/types";
 import { pushEvent } from "./bootstrap";
 import { annex, declareWar, joinWar } from "./step-world";
+import { isPlayerCountry } from "./seats";
 
 /**
  * History on rails, for events the scenario's whole premise rests on. Each fires
@@ -76,7 +77,7 @@ export function stepScripted(w: World): void {
     const key = `${w.scenarioId}-${i}`;
     if (seen.has(key)) return;
     seen.add(key);
-    if (w.playerCountry && s.actors.includes(w.playerCountry)) return;
+    if (s.actors.some((actor) => isPlayerCountry(w, actor))) return;
     s.run(w);
   });
 }
