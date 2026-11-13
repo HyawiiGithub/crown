@@ -718,8 +718,8 @@ function stepCompanies(world: World, rnd: Rng): void {
     const erp = 0.03 + (50 - world.markets.riskAppetite) * 0.0009;
     const discount = Math.max(0.025, e.macro.bondYield + erp - Math.max(0, e.monetary.inflation) * 0.5);
     const growthPremium = clamp(prof.techIntensity * 0.025 + revenueGrowth * 0.04, -0.01, 0.03);
-    co.pe = clamp(1 / Math.max(0.015, discount - growthPremium), 3, 60);
-    const fair = Math.max(co.revenue * 0.12, Math.max(net, co.revenue * 0.01) * co.pe);
+    co.pe = clamp(1 / Math.max(0.015, discount - growthPremium), 3, 30);
+    const fair = Math.min(co.revenue * 10, Math.max(co.revenue * 0.12, Math.max(net, co.revenue * 0.01) * co.pe));
     const noise = rnd.normal() * world.params.marketVolatility * 0.12 * Math.sqrt(dt);
     co.valuation = Math.max(1e5, co.valuation * Math.exp(0.7 * Math.log(fair / Math.max(1, co.valuation)) * dt + noise));
     co.sharePrice = Math.max(0.01, co.valuation / Math.max(1, co.shares ?? 1));

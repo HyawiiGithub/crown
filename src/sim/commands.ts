@@ -159,7 +159,7 @@ export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Reco
     }
     case "set-research": {
       const focus = String(body.focus ?? "");
-      if (focus !== "army" && focus !== "logistics" && focus !== "industry") return { ok: false, message: "Unknown field." };
+      if (focus !== "army" && focus !== "logistics" && focus !== "industry" && focus !== "navy") return { ok: false, message: "Unknown field." };
       techOf(c).focus = focus;
       return { ok: true, message: `Research redirected to ${focus}.` };
     }
@@ -239,7 +239,7 @@ export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Reco
       const mine = c.military.branches.navy.active * (c.military.branches.navy.quality / 100);
       const theirs = d.military.branches.navy.active * (d.military.branches.navy.quality / 100);
       const edge = mine / Math.max(1, mine + theirs);
-      const odds = clamp(0.2 + edge * 0.95 + (c.tech?.logistics ?? 0) * 0.02, 0.05, 0.95);
+      const odds = clamp(0.2 + edge * 0.9 + (c.tech?.logistics ?? 0) * 0.015 + (c.tech?.navy ?? 0) * 0.03, 0.05, 0.95);
       const place = String(body.place ?? "").slice(0, 40) || d.name;
       const cost = Math.max(1e6, e.gdp * 0.008);
       e.fiscal.debt += cost;
@@ -262,9 +262,10 @@ export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Reco
       if (!d || d.id === c.id) return { ok: false, message: "Pick another country." };
       const cost = Math.max(1e5, e.gdp * 0.0015);
       e.fiscal.debt += cost;
-      const odds = clamp(0.32 + (c.tech?.army ?? 0) * 0.03 + (c.military.morale - 50) * 0.004 - d.cohesion * 0.002, 0.08, 0.9);
+      const odds = clamp(0.32 + (c.tech?.army ?? 0) * 0.03 + (c.military.morale - 50) * 0.004 - d.cohesion * 0.002 - (d.counterIntel ?? 0) * 0.02, 0.05, 0.9);
       const ok = rng.chance(odds);
       d.relations[c.id] = clamp((d.relations[c.id] ?? 0) - 12, -100, 100);
+      d.counterIntel = Math.min(20, (d.counterIntel ?? 0) + 1.5);
       if (!ok) {
         c.executive.approval = clamp(c.executive.approval - 3, 0, 100);
         pushEvent(world, { kind: "military", severity: "notice", country: c.id, title: `${c.name}: operation in ${d.name} blown`, body: `The team was rolled up. ${d.name} protests and the cost (${(cost / 1e9).toFixed(2)}B) is sunk.`, tags: ["covert"] });

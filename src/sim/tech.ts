@@ -9,10 +9,10 @@ import { clamp } from "./rng";
  * equipped a division is; industrial research lifts productivity.
  */
 
-export type TechField = "army" | "logistics" | "industry";
+export type TechField = "army" | "logistics" | "industry" | "navy";
 
 export function techOf(c: Country) {
-  return (c.tech ??= { army: 0, logistics: 0, industry: 0, points: 0, focus: "industry" as TechField });
+  return (c.tech ??= { army: 0, logistics: 0, industry: 0, navy: 0, points: 0, focus: "industry" as TechField });
 }
 
 export function costOf(level: number): number {

@@ -443,6 +443,24 @@ app.get("/api/worlds/:id", async (c) => {
   return c.json({ world: parseWorldRow(row), stats });
 });
 
+app.get("/api/worlds/:id/chat", async (c) => {
+  const raw = await c.env.KV.get(`chat:${c.req.param("id")}`);
+  return c.json({ messages: raw ? JSON.parse(raw) : [] });
+});
+
+app.post("/api/worlds/:id/chat", async (c) => {
+  const u = me(c);
+  const body = (await c.req.json()) as { text?: string };
+  const text = String(body.text ?? "").trim().slice(0, 500);
+  if (!text) return c.json({ error: "Say something" }, 400);
+  const key = `chat:${c.req.param("id")}`;
+  const raw = await c.env.KV.get(key);
+  const list = (raw ? JSON.parse(raw) : []) as { user: string; text: string; at: number }[];
+  list.push({ user: u.username, text, at: Date.now() });
+  while (list.length > 100) list.shift();
+  await c.env.KV.put(key, JSON.stringify(list));
+  return c.json({ ok: true });
+});
 app.delete("/api/worlds/:id", async (c) => {
   const u = me(c);
   requireCapability(u, "world.delete");

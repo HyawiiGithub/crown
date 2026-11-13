@@ -902,7 +902,8 @@ export interface TechState {
   industry: number;
   /** Progress towards the next level in the current field. */
   points: number;
-  focus: "army" | "logistics" | "industry";
+  navy: number;
+  focus: "army" | "logistics" | "industry" | "navy";
 }
 
 export interface MilitaryState {
@@ -1226,6 +1227,8 @@ export interface Country {
   unrest: UnrestEvent[];
   /** Population in millions. */
   flagEmoji: string;
+  /** 0..20, how well this state rolls up foreign agents. */
+  counterIntel?: number;
   /** Research progress. */
   tech?: TechState;
   /** Crisis, when the state is coming apart. */

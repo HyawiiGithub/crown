@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { BudgetPlan, Character, Company, Country, MarketState, SectorId, Sanction, TaxPolicy, Treaty, War } from "../../shared/types";
 import { SECTORS, COMMODITY_LABELS } from "../../data/economy";
 import { COUNTRY_BY_ISO3 } from "../../data/countries";
@@ -910,7 +910,7 @@ function Military({ c, mine }: { c: Country; mine: boolean }) {
       </div>
       <div className="card">
         <div className="row"><strong className="grow">Research</strong><span className="dim mono">{Math.round(c.tech?.points ?? 0)} pts</span></div>
-        {(["army", "logistics", "industry"] as const).map((f) => (
+        {(["army", "logistics", "industry", "navy"] as const).map((f) => (
           <div key={f} className="row" style={{ fontSize: 12, padding: "2px 0" }}>
             <span className="grow" style={{ textTransform: "capitalize" }}>{f}</span>
             <span className="mono">{c.tech?.[f] ?? 0}</span>
@@ -1317,5 +1317,59 @@ export function NewspaperButton() {
         </div>
       )}
     </>
+  );
+}
+/** Room chat for a live multiplayer world. */
+export function ChatBox() {
+  const worldId = useStore((s) => s.worldId);
+  const user = useStore((s) => s.user);
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [msgs, setMsgs] = useState<{ user: string; text: string; at: number }[]>([]);
+  useEffect(() => {
+    if (!worldId || !open) return;
+    let alive = true;
+    const load = async () => {
+      try {
+        const r = await fetch(`/api/worlds/${encodeURIComponent(worldId)}/chat`);
+        const j = (await r.json()) as { messages?: { user: string; text: string; at: number }[] };
+        if (alive) setMsgs(j.messages ?? []);
+      } catch {
+        if (alive) setMsgs([]);
+      }
+    };
+    void load();
+    const id = window.setInterval(load, 6000);
+    return () => { alive = false; window.clearInterval(id); };
+  }, [worldId, open]);
+  if (!worldId || !user) return null;
+  return (
+    <div style={{ position: "fixed", left: 16, bottom: 56, zIndex: 20, width: "min(300px, 86vw)" }}>
+      <button className="btn btn--sm" aria-expanded={open} onClick={() => setOpen((v) => !v)}>Chat</button>
+      {open && (
+        <div className="card" style={{ display: "grid", gap: 6, marginTop: 6, maxHeight: "34vh" }}>
+          <div style={{ overflow: "auto", display: "grid", gap: 4, maxHeight: "24vh" }}>
+            {msgs.length === 0 && <div className="dim" style={{ fontSize: 11 }}>No messages yet.</div>}
+            {msgs.map((m, i) => (
+              <div key={i} style={{ fontSize: 12 }}><strong>{m.user}</strong> <span className="dim">{m.text}</span></div>
+            ))}
+          </div>
+          <form
+            className="row"
+            style={{ gap: 4 }}
+            onSubmit={(e) => {
+              e.preventDefault();
+              const body = text.trim();
+              if (!body) return;
+              setText("");
+              void fetch(`/api/worlds/${encodeURIComponent(worldId)}/chat`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: body }) });
+            }}
+          >
+            <input className="input grow" value={text} onChange={(e) => setText(e.target.value)} placeholder="Message" />
+            <button className="btn btn--sm" type="submit">Send</button>
+          </form>
+        </div>
+      )}
+    </div>
   );
 }

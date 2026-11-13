@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { User, WorldDirective } from "../shared/types";
 import { WorldMap, type MapLayer } from "./components/Map";
-import { CountryPanel, CrisisBanner, MarketPanel, NewspaperButton, PeaceDeal, RankingPanel, VoteTray, WarPanel } from "./components/panels";
+import { ChatBox, CountryPanel, CrisisBanner, MarketPanel, NewspaperButton, PeaceDeal, RankingPanel, VoteTray, WarPanel } from "./components/panels";
 import { DevMenu } from "./components/DevMenu";
 import { TickerList, Lobby } from "./components/Lobby";
 import { applyTheme, themeFromScenario, type Theme } from "./theme";
@@ -353,6 +353,7 @@ function WorldShell() {
       </aside>
 
       <PeaceDeal />
+      <ChatBox />
       <VoteTray />
 
       <nav className="mobile-nav" aria-label="Game views">

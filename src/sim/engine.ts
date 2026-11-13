@@ -6,6 +6,7 @@ import { stepPolitics } from "./step-politics";
 import { stepCollapse } from "./collapse";
 import { stepFoundings } from "./firms";
 import { stepResearch } from "./tech";
+import { stepSupply } from "./supply";
 import { stepDiplomacy, stepWars } from "./step-world";
 import { stepScripted } from "./scripted";
 import { applyDirectives } from "./rules";
@@ -82,6 +83,7 @@ export class SimEngine {
         stepCollapse(w, this.rng);
         stepFoundings(w, this.rng);
         stepResearch(w);
+        stepSupply(w);
         stepDiplomacy(w, this.rng, 7 * DAY);
         applyDirectives(w, 7 * DAY);
         recomputeGlobals(w);
