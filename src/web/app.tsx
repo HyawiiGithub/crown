@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { User, WorldDirective } from "../shared/types";
 import { WorldMap, type MapLayer } from "./components/Map";
-import { CountryPanel, MarketPanel, PeaceDeal, RankingPanel, VoteTray, WarPanel } from "./components/panels";
+import { CountryPanel, CrisisBanner, MarketPanel, PeaceDeal, RankingPanel, VoteTray, WarPanel } from "./components/panels";
 import { DevMenu } from "./components/DevMenu";
 import { TickerList, Lobby } from "./components/Lobby";
 import { applyTheme, themeFromScenario, type Theme } from "./theme";
@@ -338,6 +338,7 @@ function WorldShell() {
           onChange={(id) => s.set({ rightTab: id })}
         />
         <div className="grow" style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+          {shown?.crisis && <CrisisBanner c={shown} mine={shown.id === s.playerCountry} />}
           {(s.rightTab === "government" || s.rightTab === "country") && <CountryPanel key={shown?.id ?? "none"} country={shown} />}
           {s.rightTab === "markets" && <MarketPanel markets={s.markets} companies={s.companies} />}
         </div>

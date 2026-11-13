@@ -1216,6 +1216,8 @@ export interface Country {
   unrest: UnrestEvent[];
   /** Population in millions. */
   flagEmoji: string;
+  /** Crisis, when the state is coming apart. */
+  crisis?: CrisisState;
   /** Occupier, if any. */
   occupiedBy?: Iso3;
   /** Nuclear weapons count. */
@@ -1228,6 +1230,18 @@ export interface Country {
   /** Set when the state has been abolished by conquest/annexation. */
   annexedBy?: Iso3;
   banned?: boolean;
+}
+
+/** A state on the road to dissolution: pressure, unrest, armed revolt, secession. */
+export interface CrisisState {
+  stage: "pressure" | "unrest" | "armed" | "secession" | "dissolved";
+  /** 0..1 how far the state has travelled towards dissolution. */
+  tension: number;
+  since: SimSeconds;
+  /** Lands already lost to breakaways. */
+  lost: string[];
+  measures: string[];
+  lastEventAt: SimSeconds;
 }
 
 export interface UnrestEvent {

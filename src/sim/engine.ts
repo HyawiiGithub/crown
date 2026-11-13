@@ -3,6 +3,7 @@ import { pushEvent, recomputeGlobals } from "./bootstrap";
 import { Rng, clamp } from "./rng";
 import { SECONDS_PER_YEAR, stepAnnualEconomy, stepEconomy } from "./step-economy";
 import { stepPolitics } from "./step-politics";
+import { stepCollapse } from "./collapse";
 import { stepDiplomacy, stepWars } from "./step-world";
 import { stepScripted } from "./scripted";
 import { applyDirectives } from "./rules";
@@ -76,6 +77,7 @@ export class SimEngine {
       if (w.dayCount % 7 === 0) {
         stepEconomy(w, this.rng);
         stepPolitics(w, this.rng);
+        stepCollapse(w, this.rng);
         stepDiplomacy(w, this.rng, 7 * DAY);
         applyDirectives(w, 7 * DAY);
         recomputeGlobals(w);

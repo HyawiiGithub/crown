@@ -408,6 +408,13 @@ function runLine(world: World, line: string): string | null {
         c.unrestRisk = clamp(c.unrestRisk + Number(args[1] ?? 0.1), 0, 1);
         return `${c.name} unrest ${c.unrestRisk.toFixed(2)}`;
       }
+      case "crisis": {
+        const c = world.countries[args[0]];
+        if (!c) return null;
+        const tension = clamp(Number(args[1] ?? 0.5), 0, 1);
+        c.crisis = { stage: "pressure", tension, since: world.t, lost: [], measures: [], lastEventAt: 0 };
+        return `${c.name} crisis at ${tension}`;
+      }
       case "approval": {
         const c = world.countries[args[0]];
         if (!c) return null;

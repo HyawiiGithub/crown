@@ -1165,3 +1165,31 @@ export function RankingPanel({ countries, onPick }: { countries: Record<string, 
 }
 
 export { can, YEAR };
+
+/** A state coming apart: pressure, armed revolt, republics leaving. */
+export function CrisisBanner({ c, mine }: { c: Country; mine: boolean }) {
+  const crisis = c.crisis;
+  if (!crisis) return null;
+  const tone = crisis.tension > 0.6 ? "var(--negative)" : "#d08b2c";
+  return (
+    <div className="card" style={{ borderColor: tone, display: "grid", gap: 8, marginBottom: 8 }}>
+      <div className="row">
+        <strong className="grow">State crisis</strong>
+        <Chip>{crisis.stage}</Chip>
+      </div>
+      <Bar value={crisis.tension} tone={tone} />
+      <div className="dim" style={{ fontSize: 11 }}>
+        {Math.round(crisis.tension * 100)}% towards dissolution
+        {crisis.lost.length ? ` · ${crisis.lost.length} land${crisis.lost.length === 1 ? "" : "s"} lost` : ""}
+      </div>
+      {mine && (
+        <div className="row row--wrap" style={{ gap: 4 }}>
+          <button className="btn btn--sm" onClick={() => void act({ type: "crisis-response", measure: "reform" })}>Reform</button>
+          <button className="btn btn--sm" onClick={() => void act({ type: "crisis-response", measure: "subsidies" })}>Subsidise</button>
+          <button className="btn btn--sm btn--danger" onClick={() => void act({ type: "crisis-response", measure: "crackdown" })}>Crack down</button>
+          <button className="btn btn--sm" onClick={() => void act({ type: "crisis-response", measure: "concede" })}>Let a republic go</button>
+        </div>
+      )}
+    </div>
+  );
+}
