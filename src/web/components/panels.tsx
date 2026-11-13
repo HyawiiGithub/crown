@@ -523,25 +523,43 @@ function Firms({ c, mine }: { c: Country; mine: boolean }) {
   const companies = useStore((s) => s.companies);
   const rows = Object.values(companies).filter((x) => x.country === c.id).sort((a, b) => b.valuation - a.valuation);
   const [open, setOpen] = useState<string | null>(null);
+  const [sector, setSector] = useState<SectorId>("manufacturing");
   const selected = open ? companies[open] : undefined;
-  if (!rows.length) return <Empty>No major corporations are based here in this era.</Empty>;
+  const cost = Math.max(1e6, c.economy.gdp * 0.02);
+  if (!rows.length && !mine) return <Empty>No major corporations are based here in this era.</Empty>;
   return (
     <div className="stack">
-      <DataTable<Company>
-        rows={rows}
-        rowKey={(x) => x.id}
-        onRow={(x) => setOpen(open === x.id ? null : x.id)}
-        columns={[
-          { id: "n", label: "Company", render: (x) => <span className="truncate">{x.name}{x.insolvent ? " (bankrupt)" : ""}</span> },
-          { id: "r", label: "Revenue", right: true, render: (x) => <span className="mono">${credits(x.revenue)}</span> },
-          { id: "v", label: "Value", right: true, render: (x) => <span className="mono">${credits(x.valuation)}</span> },
-        ]}
-      />
+      {mine && (
+        <div className="card" style={{ display: "grid", gap: 6 }}>
+          <strong style={{ fontSize: 12 }}>Sponsor a firm</strong>
+          <div className="dim" style={{ fontSize: 11 }}>The treasury pays ${credits(cost)} for 51%, so the state can direct output. Free-market opinion will not like it.</div>
+          <div className="row" style={{ gap: 6 }}>
+            <select className="input grow" value={sector} onChange={(e) => setSector(e.target.value as SectorId)}>
+              {Object.entries(SECTORS).map(([id, x]) => <option key={id} value={id}>{x.label}</option>)}
+            </select>
+            <button className="btn btn--sm btn--primary" onClick={() => void act({ type: "sponsor-firm", sector })}>Sponsor</button>
+          </div>
+        </div>
+      )}
+      {rows.length ? (
+        <DataTable<Company>
+          rows={rows}
+          rowKey={(x) => x.id}
+          onRow={(x) => setOpen(open === x.id ? null : x.id)}
+          columns={[
+            { id: "n", label: "Company", render: (x) => <span className="truncate">{x.name}{x.insolvent ? " (bankrupt)" : ""}</span> },
+            { id: "s", label: "Sector", render: (x) => <span className="dim truncate">{SECTORS[x.sector]?.label ?? x.sector}</span> },
+            { id: "o", label: "State", right: true, render: (x) => <span className="mono">{Math.round(x.stateOwnership * 100)}%</span> },
+            { id: "v", label: "Value", right: true, render: (x) => <span className="mono">${credits(x.valuation)}</span> },
+          ]}
+        />
+      ) : (
+        <Empty>No firms here yet. Sponsor one, or wait for the population to start its own.</Empty>
+      )}
       {selected && <CompanyCard co={selected} mine={mine} />}
     </div>
   );
 }
-
 function CompanyCard({ co, mine }: { co: Company; mine: boolean }) {
   return (
     <div className="card">

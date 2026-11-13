@@ -932,7 +932,7 @@ function buildTradeNetwork(world: World, rnd: Rng): void {
   }
 }
 
-function materialiseCompany(seed: import("../shared/types").CompanySeed, world: World, rnd: Rng, scenario: Scenario): Company {
+export function materialiseCompany(seed: import("../shared/types").CompanySeed, world: World, rnd: Rng, scenario: Pick<Scenario, "year">): Company {
   const profile = SECTORS[seed.sector];
   const country = world.countries[seed.country];
   const margin = profile.margin * rnd.float(0.7, 1.3);

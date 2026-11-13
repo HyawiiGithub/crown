@@ -30,6 +30,7 @@ export const DEFAULT_PARAMS: SimulationParams = {
   corporateWeight: 0.42,
   whipStrength: 0.86,
   corruptionRate: 0.00016,
+  firmFormation: 0.03,
   eventRate: 1,
   seed: 20260101,
 };

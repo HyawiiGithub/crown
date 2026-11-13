@@ -5,6 +5,8 @@ import { stabilisationPlan } from "./step-economy";
 import { clamp, clamp01, type Rng } from "./rng";
 import { applyPolicy, introduceBill, needsLegislature } from "./step-politics";
 import { answerCrisis } from "./collapse";
+import { foundCompany } from "./firms";
+import { SECTORS } from "../data/economy";
 import { annex, createPuppetState, declareWar, imposeSanction, liftSanction, signTreaty, transferLand, vassalise } from "./step-world";
 import { frontOccupation, peaceAccepted, peaceCost, peaceStanding, type PeaceTerms } from "./occupation";
 
@@ -153,6 +155,18 @@ export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Reco
       if (e.centralBank.regime === "union") return { ok: false, message: "Asset purchases are run by the currency union." };
       e.centralBank.qe = clamp(Number(body.value), 0, 1);
       return { ok: true, message: `Central bank holdings set to ${(e.centralBank.qe * 100).toFixed(0)}% of GDP.` };
+    }
+    case "sponsor-firm": {
+      const sector = String(body.sector ?? "") as SectorId;
+      if (!SECTORS[sector]) return { ok: false, message: "That is not an industry." };
+      const cost = Math.max(1e6, e.gdp * 0.02);
+      if (e.reserves >= cost) e.reserves -= cost;
+      else e.fiscal.debt += cost;
+      const co = foundCompany(world, c.id, sector, rng, { stateShare: 0.51, revenue: cost * 1.5 });
+      if (!co) return { ok: false, message: "The firm could not be registered." };
+      c.executive.approval = clamp(c.executive.approval - 2, 0, 100);
+      pushEvent(world, { kind: "economic", severity: "notice", country: c.id, title: `${c.name} sponsors ${co.name}`, body: `The treasury puts ${(cost / 1e9).toFixed(2)}B into a new ${SECTORS[sector].label.toLowerCase()} firm and takes 51%.`, tags: ["firms", "sponsorship"] });
+      return { ok: true, message: `${co.name} founded; the state holds 51%.` };
     }
     case "crisis-response": {
       const said = answerCrisis(world, c, String(body.measure ?? ""));

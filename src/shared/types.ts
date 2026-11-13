@@ -1439,6 +1439,8 @@ export interface Scenario {
  * from the Dev Console at runtime.
  */
 export interface SimulationParams {
+  /** Chance per country per week that the population starts a new firm. */
+  firmFormation: number;
   /** Real seconds per simulation tick. */
   tickMs: number;
   /** How much a country's real growth compounds toward the target. */
