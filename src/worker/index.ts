@@ -443,6 +443,30 @@ app.get("/api/worlds/:id", async (c) => {
   return c.json({ world: parseWorldRow(row), stats });
 });
 
+app.post("/api/worlds/:id/join", async (c) => {
+  const u = me(c);
+  const id = c.req.param("id");
+  const row = await c.env.DB.prepare(`SELECT id, is_public, archived FROM worlds WHERE id = ?`).bind(id).first<{ id: string; is_public: number; archived: number }>();
+  if (!row || row.archived) return c.json({ error: "No such world" }, 404);
+  if (!row.is_public) {
+    const member = await c.env.DB.prepare(`SELECT 1 AS ok FROM world_members WHERE world_id = ? AND user_id = ?`).bind(id, u.id).first();
+    if (!member) return c.json({ error: "That world is closed" }, 403);
+  }
+  const count = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM world_members WHERE world_id = ?`).bind(id).first<{ n: number }>();
+  const already = await c.env.DB.prepare(`SELECT 1 AS ok FROM world_members WHERE world_id = ? AND user_id = ?`).bind(id, u.id).first();
+  if (!already && Number(count?.n ?? 0) >= 8) return c.json({ error: "That world is full" }, 409);
+  await c.env.DB.prepare(`INSERT OR IGNORE INTO world_members (world_id, user_id, joined_at) VALUES (?, ?, ?)`).bind(id, u.id, Date.now()).run();
+  await audit(c.env, { userId: u.id, username: u.username, action: "world.join", target: id });
+  return c.json({ ok: true, id });
+});
+
+app.get("/api/worlds/:id/members", async (c) => {
+  const id = c.req.param("id");
+  const rows = await c.env.DB.prepare(
+    `SELECT m.user_id, m.joined_at, u.username, u.avatar FROM world_members m LEFT JOIN users u ON u.id = m.user_id WHERE m.world_id = ? ORDER BY m.joined_at ASC LIMIT 16`,
+  ).bind(id).all<Record<string, unknown>>();
+  return c.json({ members: rows.results.map((r) => ({ userId: String(r.user_id), username: String(r.username ?? "unknown"), avatar: String(r.avatar ?? ""), joinedAt: Number(r.joined_at) })) });
+});
 app.get("/api/worlds/:id/chat", async (c) => {
   const raw = await c.env.KV.get(`chat:${c.req.param("id")}`);
   return c.json({ messages: raw ? JSON.parse(raw) : [] });

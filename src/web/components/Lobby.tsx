@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { TickerEntry } from "../../shared/types";
-import { call, previewScenario, useStore, type PolityPreview } from "../store";
+import { call, joinMultiplayer, previewScenario, useStore, type PolityPreview } from "../store";
 import { applyTheme, themeFromScenario } from "../theme";
 import { ago, credits, GOVERNMENT_LABELS, simDate } from "../format";
 import { Chip, Empty } from "./primitives";
@@ -18,10 +18,20 @@ export function TickerList({ ticker, onPick }: { ticker: TickerEntry[]; onPick: 
   );
 }
 
+type OpenWorld = { id: string; name: string; scenario_id: string; members: number; updated_at: number };
+
 export function Lobby() {
   const s = useStore();
   const [setup, setSetup] = useState<string | null>(null);
+  const [worlds, setWorlds] = useState<OpenWorld[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    void fetch("/api/worlds")
+      .then((r) => r.json())
+      .then((j: { worlds?: OpenWorld[] }) => setWorlds(j.worlds ?? []))
+      .catch(() => setWorlds([]));
+  }, []);
 
   useEffect(() => {
     void s.refreshSaves();
@@ -70,6 +80,23 @@ export function Lobby() {
                   <div className="dim mono" style={{ fontSize: 11 }}>{simDate(w.startDate, w.t)} · saved {ago(w.updatedAt)}</div>
                 </div>
                 <button className="btn btn--sm" title="Delete this save" onClick={() => { if (confirm(`Delete the save "${w.name}"?`)) void call({ kind: "delete-save", saveId: w.id }).then(() => s.refreshSaves()); }}>Delete</button>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {worlds.length > 0 && (
+        <section style={{ maxWidth: 1500, margin: "0 auto", padding: "22px 34px 0", width: "100%" }}>
+          <h3 style={{ marginBottom: 10 }}>Open worlds</h3>
+          <div className="save-grid">
+            {worlds.map((w) => (
+              <article key={w.id} className="card save-card">
+                <div className="grow" style={{ minWidth: 0 }}>
+                  <strong className="truncate" style={{ display: "block" }}>{w.name}</strong>
+                  <div className="dim mono truncate" style={{ fontSize: 11 }}>{w.scenario_id} · {w.members} {w.members === 1 ? "player" : "players"}</div>
+                </div>
+                <button className="btn btn--sm btn--primary" onClick={() => void joinMultiplayer(w.id)}>Join</button>
               </article>
             ))}
           </div>
