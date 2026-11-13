@@ -19,7 +19,7 @@
     "db:migrate:remote": "wrangler d1 migrations apply crown --remote",
     "deploy": "npm run build:web && wrangler deploy",
     "deploy:pages": "npm run build:web && wrangler pages deploy dist --project-name crown",
-    "test:mp": "node scripts/mp-lobby.test.mjs"
+    "test:mp": "node scripts/mp-lobby.test.mjs && tsx scripts/do-roster-guard.test.ts"
   },
   "dependencies": {
     "d3-geo": "^3.1.1",

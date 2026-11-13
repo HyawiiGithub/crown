@@ -113,7 +113,7 @@ export class SimObject {
       case "/join":
         return this.handleWebSocket(request);
       case "/action":
-        return json(await this.action(request));
+        return this.action(request);
       case "/dev":
         return json(await this.dev(request));
       case "/checkpoint":
@@ -421,8 +421,31 @@ export class SimObject {
   // Player actions
   // =========================================================================
 
-  private async action(request: Request): Promise<{ ok: boolean; message: string; data?: unknown }> {
+  private async action(request: Request): Promise<Response> {
     const body = (await request.json()) as { type: string; userId?: string; [k: string]: unknown };
+    const worldId = this.worldId();
+    const userId = String(body.userId ?? "").trim();
+    if (!userId) return json({ ok: false, message: "Sign in before acting in a world" }, 401);
+
+    // The Worker checks the roster before forwarding anything. The object checks
+    // it again because it is the thing that owns the world: a caller that
+    // reaches it another way still cannot act in a world it never joined, and a
+    // failed check refuses rather than allows.
+    let member: { ok: number } | null;
+    try {
+      member = await this.env.DB.prepare(`SELECT 1 AS ok FROM world_members WHERE world_id = ? AND user_id = ?`)
+        .bind(worldId, userId)
+        .first<{ ok: number }>();
+    } catch (err) {
+      console.error("roster check failed", err);
+      return json({ ok: false, message: "The world is unavailable" }, 503);
+    }
+    if (!member) return json({ ok: false, message: "Join this world before acting in it" }, 403);
+
+    return json(await this.applyAction(body));
+  }
+
+  private async applyAction(body: { type: string; userId?: string; [k: string]: unknown }): Promise<{ ok: boolean; message: string; data?: unknown }> {
     await this.load(this.worldId());
     const w = this.world!;
 
@@ -435,7 +458,29 @@ export class SimObject {
           if (c.annexedBy) return { ok: false, message: `${c.name} no longer exists` };
           if (c.overlord) return { ok: false, message: `${c.name} is a possession of ${w.countries[c.overlord]?.name ?? c.overlord}` };
           if (!c.legislature && !w.companies) return { ok: false, message: "Nothing to run here" };
-                    pushEvent(w, { kind: "political", severity: "info", country: iso3, title: `${body.username ?? "A player"} takes the reins in ${c.name}`, body: `The government of ${c.name} is now in human hands.`, byUserId: body.userId, tags: ["player"] });
+          // One seat per nation: the reservation taken at join is what refuses
+          // everyone else, and a claim moves the claimant's own seat here.
+          const userId = String(body.userId ?? "");
+          let holder: { user_id: string } | null;
+          try {
+            holder = await this.env.DB.prepare(`SELECT user_id FROM world_members WHERE world_id = ? AND plays_country = ?`)
+              .bind(this.worldId(), iso3)
+              .first<{ user_id: string }>();
+          } catch {
+            return { ok: false, message: "Could not check who holds that country" };
+          }
+          if (holder && holder.user_id !== userId) return { ok: false, message: `${c.name} is already played by another member` };
+          if (!holder) {
+            try {
+              await this.env.DB.prepare(`UPDATE world_members SET plays_country = ? WHERE world_id = ? AND user_id = ?`)
+                .bind(iso3, this.worldId(), userId)
+                .run();
+            } catch (err) {
+              if (/UNIQUE constraint failed/i.test(String(err))) return { ok: false, message: `${c.name} is already played by another member` };
+              return { ok: false, message: "Could not reserve that country" };
+            }
+          }
+          pushEvent(w, { kind: "political", severity: "info", country: iso3, title: `${body.username ?? "A player"} takes the reins in ${c.name}`, body: `The government of ${c.name} is now in human hands.`, byUserId: body.userId, tags: ["player"] });
           return { ok: true, message: `You now govern ${c.name}` };
         }
         case "vote": {

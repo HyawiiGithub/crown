@@ -400,12 +400,17 @@ app.get("/api/portrait", async (c) => {
 
 const simStub = (c: { env: Env }, worldId: string) => c.env.SIM.get(c.env.SIM.idFromName(worldId));
 
+/** Seats in a world that does not say otherwise. */
+const DEFAULT_MAX_PLAYERS = 8;
+const MAX_MAX_PLAYERS = 32;
+
 // Lobbies are created by the developer: POST /api/worlds requires world.create.
 
 app.get("/api/worlds", async (c) => {
   const u = c.get("user");
   const rows = await c.env.DB.prepare(
     `SELECT w.id, w.name, w.scenario_id, w.updated_at, w.created_at, w.is_public, w.owner_id,
+            w.max_players,
             (SELECT COUNT(*) FROM world_members m WHERE m.world_id = w.id) AS members,
             (SELECT COUNT(*) FROM worlds w2 WHERE w2.scenario_id = w.scenario_id AND w2.archived = 0) AS siblings
        FROM worlds w WHERE w.archived = 0 ORDER BY w.updated_at DESC LIMIT 100`,
@@ -416,22 +421,24 @@ app.get("/api/worlds", async (c) => {
 app.post("/api/worlds", async (c) => {
   const u = me(c);
   requireCapability(u, "world.create");
-  const body = (await c.req.json()) as { scenarioId?: string; name?: string; description?: string };
+  const body = (await c.req.json()) as { scenarioId?: string; name?: string; description?: string; maxPlayers?: number };
   const scenarioId = body.scenarioId ?? "2026";
   const scenario = getScenario(scenarioId);
   const id = `${scenarioId}:${crypto.randomUUID().slice(0, 8)}`;
   const name = (body.name ?? `${scenario.name} ${new Date().toISOString().slice(0, 10)}`).slice(0, 80);
+  const asked = Math.round(Number(body.maxPlayers ?? DEFAULT_MAX_PLAYERS));
+  const maxPlayers = Math.max(2, Math.min(MAX_MAX_PLAYERS, Number.isFinite(asked) && asked > 0 ? asked : DEFAULT_MAX_PLAYERS));
 
   const stub = simStub(c, id);
   await stub.fetch("https://do/init?worldId=" + encodeURIComponent(id) + "&name=" + encodeURIComponent(name));
 
   await c.env.DB.prepare(
-    `INSERT INTO worlds (id, name, scenario_id, owner_id, created_at, updated_at, is_public, description) VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
-  ).bind(id, name, scenarioId, u.id, Date.now(), Date.now(), (body.description ?? "").slice(0, 500)).run();
+    `INSERT INTO worlds (id, name, scenario_id, owner_id, created_at, updated_at, is_public, description, max_players) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+  ).bind(id, name, scenarioId, u.id, Date.now(), Date.now(), (body.description ?? "").slice(0, 500), maxPlayers).run();
   await c.env.DB.prepare(`INSERT OR REPLACE INTO world_members (world_id, user_id, joined_at) VALUES (?, ?, ?)`).bind(id, u.id, Date.now()).run();
-  await audit(c.env, { userId: u.id, username: u.username, action: "world.create", target: id, after: { scenarioId, name } });
+  await audit(c.env, { userId: u.id, username: u.username, action: "world.create", target: id, after: { scenarioId, name, maxPlayers } });
 
-  return c.json({ ok: true, id, name, scenarioId });
+  return c.json({ ok: true, id, name, scenarioId, maxPlayers });
 });
 
 app.get("/api/worlds/:id", async (c) => {
@@ -443,31 +450,59 @@ app.get("/api/worlds/:id", async (c) => {
   return c.json({ world: parseWorldRow(row), stats });
 });
 
+/**
+ * Join a world's roster, optionally taking a nation at the same time.
+ *
+ * The seat is reserved by the same statement that claims the roster slot, and
+ * a partial unique index on (world_id, plays_country) backs it, so two members
+ * can never hold the same country. The cap comes from the world row, so each
+ * world can be sized differently instead of every world sharing one constant.
+ */
 app.post("/api/worlds/:id/join", async (c) => {
   const u = me(c);
   const id = c.req.param("id");
   const named = c.req.query("worldId");
   if (named && named !== id) return c.json({ error: "World mismatch" }, 400);
-  const row = await c.env.DB.prepare(`SELECT id, is_public, archived FROM worlds WHERE id = ?`).bind(id).first<{ id: string; is_public: number; archived: number }>();
+  const row = await c.env.DB.prepare(`SELECT id, is_public, archived, max_players FROM worlds WHERE id = ?`).bind(id).first<{ id: string; is_public: number; archived: number; max_players: number }>();
   if (!row || row.archived) return c.json({ error: "No such world" }, 404);
-  if (!row.is_public) {
-    const member = await c.env.DB.prepare(`SELECT 1 AS ok FROM world_members WHERE world_id = ? AND user_id = ?`).bind(id, u.id).first();
-    if (!member) return c.json({ error: "That world is closed" }, 403);
+  const mine = await c.env.DB.prepare(`SELECT plays_country FROM world_members WHERE world_id = ? AND user_id = ?`).bind(id, u.id).first<{ plays_country: string | null }>();
+  if (!row.is_public && !mine) return c.json({ error: "That world is closed" }, 403);
+
+  const body = (await c.req.json().catch(() => ({}))) as { country?: string };
+  const country = String(body.country ?? "").trim().toUpperCase();
+  if (country && !/^[A-Z]{3}$/.test(country)) return c.json({ error: "Choose a country to play" }, 400);
+
+  try {
+    if (mine) {
+      // Already on the roster: idempotent, unless a different seat is asked for.
+      if (country && country !== mine.plays_country) {
+        await c.env.DB.prepare(`UPDATE world_members SET plays_country = ? WHERE world_id = ? AND user_id = ?`).bind(country, id, u.id).run();
+      }
+    } else {
+      // The cap and the seat are claimed by this one statement, so a world
+      // cannot be overshot by two joins arriving together.
+      const cap = Math.max(2, Number(row.max_players) || DEFAULT_MAX_PLAYERS);
+      const res = await c.env.DB
+        .prepare(`INSERT INTO world_members (world_id, user_id, plays_country, joined_at) SELECT ?, ?, ?, ? WHERE (SELECT COUNT(*) FROM world_members WHERE world_id = ?) < ?`)
+        .bind(id, u.id, country || null, Date.now(), id, cap)
+        .run();
+      if (Number(res.meta.changes ?? 0) === 0) return c.json({ error: "That world is full" }, 409);
+    }
+  } catch (err) {
+    if (/UNIQUE constraint failed/i.test(String(err))) return c.json({ error: `${country} is already taken in that world` }, 409);
+    throw err;
   }
-  const count = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM world_members WHERE world_id = ?`).bind(id).first<{ n: number }>();
-  const already = await c.env.DB.prepare(`SELECT 1 AS ok FROM world_members WHERE world_id = ? AND user_id = ?`).bind(id, u.id).first();
-  if (!already && Number(count?.n ?? 0) >= 8) return c.json({ error: "That world is full" }, 409);
-  await c.env.DB.prepare(`INSERT OR IGNORE INTO world_members (world_id, user_id, joined_at) VALUES (?, ?, ?)`).bind(id, u.id, Date.now()).run();
-  await audit(c.env, { userId: u.id, username: u.username, action: "world.join", target: id });
-  return c.json({ ok: true, id });
+
+  await audit(c.env, { userId: u.id, username: u.username, action: "world.join", target: id, after: country ? { country } : undefined });
+  return c.json({ ok: true, id, country: country || mine?.plays_country || null });
 });
 
 app.get("/api/worlds/:id/members", async (c) => {
   const id = c.req.param("id");
   const rows = await c.env.DB.prepare(
-    `SELECT m.user_id, m.joined_at, u.username, u.avatar FROM world_members m LEFT JOIN users u ON u.id = m.user_id WHERE m.world_id = ? ORDER BY m.joined_at ASC LIMIT 16`,
+    `SELECT m.user_id, m.plays_country, m.joined_at, u.username, u.avatar FROM world_members m LEFT JOIN users u ON u.id = m.user_id WHERE m.world_id = ? ORDER BY m.joined_at ASC LIMIT 32`,
   ).bind(id).all<Record<string, unknown>>();
-  return c.json({ members: rows.results.map((r) => ({ userId: String(r.user_id), username: String(r.username ?? "unknown"), avatar: String(r.avatar ?? ""), joinedAt: Number(r.joined_at) })) });
+  return c.json({ members: rows.results.map((r) => ({ userId: String(r.user_id), username: String(r.username ?? "unknown"), avatar: String(r.avatar ?? ""), country: r.plays_country ? String(r.plays_country) : null, joinedAt: Number(r.joined_at) })) });
 });
 app.get("/api/worlds/:id/chat", async (c) => {
   const raw = await c.env.KV.get(`chat:${c.req.param("id")}`);
@@ -507,6 +542,7 @@ function parseWorldRow(row: Record<string, unknown>) {
     updatedAt: Number(row.updated_at),
     isPublic: Boolean(row.is_public),
     archived: Boolean(row.archived),
+    maxPlayers: Number(row.max_players ?? 8),
     description: String(row.description ?? ""),
   };
 }
@@ -542,15 +578,20 @@ app.get("/api/worlds/:id/stats", async (c) => {
 });
 
 /** WebSocket upgrade URL for the client. */
-app.get("/api/worlds/:id/socket-url", (c) => {
+/** WebSocket upgrade URL for the client. */
+app.get("/api/worlds/:id/socket-url", async (c) => {
   const u = c.get("user");
   const id = c.req.param("id");
+  // Presence shows the nation this member reserved here, not a site-wide field.
+  const seat = u
+    ? await c.env.DB.prepare(`SELECT plays_country FROM world_members WHERE world_id = ? AND user_id = ?`).bind(id, u.id).first<{ plays_country: string | null }>()
+    : null;
   const q = new URLSearchParams({
     userId: u?.id ?? "anon",
     username: u?.username ?? "guest",
     avatar: u?.avatar ?? "",
     staffRole: u?.staffRole ?? "player",
-    country: u?.playsCountry ?? "",
+    country: seat?.plays_country ?? "",
   });
   return c.json({ url: `/api/worlds/${encodeURIComponent(id)}/ws?${q}` });
 });

@@ -416,13 +416,18 @@ export function isStaffUser(u: User | null): boolean {
 let remoteSocket: WebSocket | null = null;
 
 /** Join a world's roster and attach to its live stream. */
-export async function joinMultiplayer(id: string): Promise<void> {
+export async function joinMultiplayer(id: string, country?: string): Promise<void> {
   const store = useStore.getState();
   store.set({ connection: "connecting" });
-  const joined = await fetch(`/api/worlds/${encodeURIComponent(id)}/join`, { method: "POST" });
+  const joined = await fetch(`/api/worlds/${encodeURIComponent(id)}/join`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(country ? { country } : {}),
+  });
   if (!joined.ok) {
+    const why = (await joined.json().catch(() => ({}))) as { error?: string };
     store.set({ connection: "idle" });
-    store.toast(joined.status === 401 ? "Sign in to join a world" : joined.status === 409 ? "That world is full" : "Could not join that world", "err");
+    store.toast(joined.status === 401 ? "Sign in to join a world" : why.error ?? "Could not join that world", "err");
     return;
   }
   const { url } = (await fetch(`/api/worlds/${encodeURIComponent(id)}/socket-url`).then((r) => r.json())) as { url: string };

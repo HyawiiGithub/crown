@@ -19,6 +19,8 @@ const STATE = process.env.MP_STATE ?? `.cache/mp-test-state-${Date.now()}`;
 const PUBLIC_WORLD = "1900:mp-public";
 const PRIVATE_WORLD = "1900:mp-private";
 const FULL_WORLD = "1900:mp-full";
+const SMALL_WORLD = "1900:mp-small";
+const WIDE_WORLD = "1900:mp-wide";
 const PASSWORD = "correct-horse-battery";
 const isWin = process.platform === "win32";
 
@@ -120,8 +122,8 @@ async function main() {
   console.log("applying migrations to", STATE);
   await wrangler(`d1 migrations apply crown --local --persist-to ${STATE}`);
   const now = Date.now();
-  for (const [id, isPublic] of [[PUBLIC_WORLD, 1], [PRIVATE_WORLD, 0], [FULL_WORLD, 1]]) {
-    d1(`INSERT INTO worlds (id, name, scenario_id, owner_id, created_at, updated_at, is_public, archived, description) VALUES ('${id}', '${id}', '1900', NULL, ${now}, ${now}, ${isPublic}, 0, '')`);
+  for (const [id, isPublic, cap] of [[PUBLIC_WORLD, 1, 8], [PRIVATE_WORLD, 0, 8], [FULL_WORLD, 1, 8], [SMALL_WORLD, 1, 2], [WIDE_WORLD, 1, 8]]) {
+    d1(`INSERT INTO worlds (id, name, scenario_id, owner_id, created_at, updated_at, is_public, archived, description, max_players) VALUES ('${id}', '${id}', '1900', NULL, ${now}, ${now}, ${isPublic}, 0, '', ${cap})`);
   }
   await startDev();
   console.log("worker ready on", BASE);
@@ -130,6 +132,9 @@ async function main() {
   // does not throttle the fixture.
   const players = [];
   for (let i = 1; i <= 9; i += 1) players.push(await register(`mp_p${i}`, `10.0.0.${i}`));
+  // Three more for the per-world cap checks, on their own addresses.
+  const capped = [];
+  for (let i = 1; i <= 3; i += 1) capped.push(await register(`mp_cap${i}`, `10.0.2.${i}`));
   const owner = players[0];
 
   // --- unauthenticated join is rejected ---
@@ -166,6 +171,28 @@ async function main() {
   const ninth = await json(`/api/worlds/${FULL_WORLD}/join`, { method: "POST", headers: { cookie: players[8].cookie } });
   check("eight players fit a world", capStatus === 200, `status ${capStatus}`);
   check("ninth player is refused with 409", ninth.status === 409, `status ${ninth.status} ${JSON.stringify(ninth.body)}`);
+
+  // --- the player cap belongs to the world ---
+  const smallJoins = [];
+  for (let i = 0; i < 2; i += 1) {
+    smallJoins.push(await json(`/api/worlds/${SMALL_WORLD}/join`, { method: "POST", headers: { cookie: capped[i].cookie } }));
+  }
+  const smallThird = await json(`/api/worlds/${SMALL_WORLD}/join`, { method: "POST", headers: { cookie: capped[2].cookie } });
+  check("a two-seat world takes two players", smallJoins.every((r) => r.status === 200), smallJoins.map((r) => r.status).join(","));
+  check("its third player is refused with 409", smallThird.status === 409, `status ${smallThird.status} ${JSON.stringify(smallThird.body)}`);
+  const wideJoin = await json(`/api/worlds/${WIDE_WORLD}/join`, { method: "POST", headers: { cookie: capped[2].cookie } });
+  check("a wider world still seats the player the small one refused", wideJoin.status === 200, `status ${wideJoin.status} ${JSON.stringify(wideJoin.body)}`);
+
+  // --- joining reserves a nation, and one nation has one player ---
+  const seatA = await json(`/api/worlds/${PUBLIC_WORLD}/join`, { method: "POST", headers: { "content-type": "application/json", cookie: owner.cookie }, body: JSON.stringify({ country: "FRA" }) });
+  check("a join reserves the country it names", seatA.status === 200 && seatA.body.country === "FRA", JSON.stringify(seatA.body));
+  const seatTaken = await json(`/api/worlds/${PUBLIC_WORLD}/join`, { method: "POST", headers: { "content-type": "application/json", cookie: players[1].cookie }, body: JSON.stringify({ country: "FRA" }) });
+  check("a second member cannot reserve the same country", seatTaken.status === 409, `status ${seatTaken.status} ${JSON.stringify(seatTaken.body)}`);
+  const seatB = await json(`/api/worlds/${PUBLIC_WORLD}/join`, { method: "POST", headers: { "content-type": "application/json", cookie: players[1].cookie }, body: JSON.stringify({ country: "ESP" }) });
+  check("the same member takes a free country instead", seatB.status === 200 && seatB.body.country === "ESP", JSON.stringify(seatB.body));
+  const seated = (await json(`/api/worlds/${PUBLIC_WORLD}/members`)).body.members ?? [];
+  const seats = Object.fromEntries(seated.map((m) => [m.userId, m.country]));
+  check("the roster records which member holds which nation", seats[owner.id] === "FRA" && seats[players[1].id] === "ESP", JSON.stringify(seats));
 
   // --- websocket: snapshot the client can adopt ---
   const sockInfo = await json(`/api/worlds/${PUBLIC_WORLD}/socket-url`, { headers: { cookie: owner.cookie } });
@@ -215,6 +242,14 @@ async function main() {
   });
   check("action from a non-member on a private world is rejected", privateAction.status === 403, `status ${privateAction.status} ${JSON.stringify(privateAction.body)}`);
 
+  // --- the object itself refuses a nation another member holds ---
+  const steal = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: players[1].cookie },
+    body: JSON.stringify({ type: "claim-country", country: "FRA" }),
+  });
+  check("the object refuses a nation another member holds", steal.body.ok === false && /already played/.test(String(steal.body.message ?? "")), JSON.stringify(steal.body));
+
   // --- a member still acts ---
   const memberAction = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
     method: "POST",
@@ -222,6 +257,8 @@ async function main() {
     body: JSON.stringify({ type: "claim-country", country: "BEL" }),
   });
   check("a member action still succeeds", memberAction.status === 200 && memberAction.body.ok === true, JSON.stringify(memberAction.body));
+  const seatedAfter = (await json(`/api/worlds/${PUBLIC_WORLD}/members`)).body.members ?? [];
+  check("claiming a nation moves the claimant's seat", seatedAfter.find((m) => m.userId === owner.id)?.country === "BEL", JSON.stringify(seatedAfter.map((m) => [m.userId, m.country])));
 
   // --- naming another world must not reach it ---
   const beforePrivate = (await json(`/api/worlds/${PRIVATE_WORLD}/snapshot`)).body.world;

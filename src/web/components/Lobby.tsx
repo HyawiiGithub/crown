@@ -18,7 +18,7 @@ export function TickerList({ ticker, onPick }: { ticker: TickerEntry[]; onPick: 
   );
 }
 
-type OpenWorld = { id: string; name: string; scenario_id: string; members: number; updated_at: number };
+type OpenWorld = { id: string; name: string; scenario_id: string; members: number; max_players?: number; updated_at: number };
 
 export function Lobby() {
   const s = useStore();
@@ -94,9 +94,9 @@ export function Lobby() {
               <article key={w.id} className="card save-card">
                 <div className="grow" style={{ minWidth: 0 }}>
                   <strong className="truncate" style={{ display: "block" }}>{w.name}</strong>
-                  <div className="dim mono truncate" style={{ fontSize: 11 }}>{w.scenario_id} · {w.members} {w.members === 1 ? "player" : "players"}</div>
+                  <div className="dim mono truncate" style={{ fontSize: 11 }}>{w.scenario_id} · {w.members}/{w.max_players ?? 8} {w.members === 1 ? "player" : "players"}</div>
                 </div>
-                <button className="btn btn--sm btn--primary" onClick={() => void joinMultiplayer(w.id)}>Join</button>
+                <button className="btn btn--sm btn--primary" onClick={() => void joinMultiplayer(w.id, s.user?.playsCountry ?? undefined)}>Join</button>
               </article>
             ))}
           </div>
