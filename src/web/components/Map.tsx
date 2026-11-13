@@ -162,7 +162,7 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
   }, [historicalActive, theme.id]);
 
   // ---- geometry, one projection for everything ----------------------------
-  const projection = useMemo(() => geoMercator().fitExtent([[6, 6], [size.w - 6, size.h - 6]], { type: "Sphere" } as never), [size.w, size.h]);
+  const projection = useMemo(() => geoMercator().fitExtent([[6, 6], [size.w - 6, size.h - 6]], { type: "MultiPoint", coordinates: [[-180, -56], [180, 78]] } as never), [size.w, size.h]);
   const pathGen = useMemo<GeoPath>(() => geoPath(projection), [projection]);
 
   const drawn = useMemo<Drawn[]>(() => {
@@ -232,6 +232,7 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
   const frontCache = useMemo(() => new Map<string, FrontGeometry | null>(), [raw, projection]);
 
   const fronts = useMemo(() => {
+    frontRings.clear();
     if (!raw) return [];
     const out: { key: string; hosts: string[]; area: string; line: string; holderName: string; territory: string; holder: string; share: number; ended: boolean }[] = [];
     for (const w of wars) {

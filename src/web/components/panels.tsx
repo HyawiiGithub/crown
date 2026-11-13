@@ -28,30 +28,36 @@ export function VoteTray() {
   const bills = useStore((s) => s.bills);
   const countries = useStore((s) => s.countries);
   const [hidden, setHidden] = useState<Record<string, true>>({});
+  const [open, setOpen] = useState(() => typeof window === "undefined" || window.innerWidth > 1080);
   const live = useMemo(() => Object.values(bills).filter((b) => !BILL_SETTLED.has(b.status) && !hidden[b.id]), [bills, hidden]);
   if (!live.length) return null;
   return (
-    <div className="card" style={{ position: "fixed", left: 16, bottom: 16, zIndex: 260, width: 330, display: "grid", gap: 10, maxHeight: "46vh", overflow: "auto" }}>
-      <div className="row"><strong className="grow">On the floor</strong><span className="dim" style={{ fontSize: 11 }}>{live.length} bill{live.length === 1 ? "" : "s"}</span></div>
-      {live.slice(0, 5).map((b) => {
-        const t = Object.values(b.tallies)[0];
-        const total = t ? t.aye + t.nay + t.abstain + t.absent : 0;
-        return (
-          <div key={b.id} style={{ display: "grid", gap: 4 }}>
-            <div className="row" style={{ gap: 6 }}>
-              <strong className="grow truncate" style={{ fontSize: 12 }}>{b.title}</strong>
-              <button className="btn btn--sm" title="Dismiss" onClick={() => setHidden((h) => ({ ...h, [b.id]: true }))}>&times;</button>
-            </div>
-            <div className="dim" style={{ fontSize: 11 }}>{countries[b.country]?.name ?? b.country} · {b.status}</div>
-            <Bar value={total ? t.aye / total : 0} />
-            <div className="mono dim" style={{ fontSize: 11 }}>{t ? `${t.aye} aye · ${t.nay} nay · ${t.abstain} abstain` : "awaiting a division"}</div>
-          </div>
-        );
-      })}
+    <div style={{ position: "fixed", right: 16, bottom: 16, zIndex: 20, display: "grid", gap: 8, justifyItems: "end", maxWidth: "min(360px, 92vw)" }}>
+      <button className="btn btn--sm" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        {open ? "Hide votes" : "On the floor"} <span className="badge">{live.length}</span>
+      </button>
+      {open && (
+        <div className="card" style={{ display: "grid", gap: 10, width: "min(330px, 92vw)", maxHeight: "42vh", overflow: "auto" }}>
+          {live.slice(0, 5).map((b) => {
+            const t = Object.values(b.tallies)[0];
+            const total = t ? t.aye + t.nay + t.abstain + t.absent : 0;
+            return (
+              <div key={b.id} style={{ display: "grid", gap: 4 }}>
+                <div className="row" style={{ gap: 6 }}>
+                  <strong className="grow truncate" style={{ fontSize: 12 }}>{b.title}</strong>
+                  <button className="btn btn--sm" title="Dismiss" onClick={() => setHidden((h) => ({ ...h, [b.id]: true }))}>&times;</button>
+                </div>
+                <div className="dim" style={{ fontSize: 11 }}>{countries[b.country]?.name ?? b.country} · {b.status}</div>
+                <Bar value={total ? t.aye / total : 0} />
+                <div className="mono dim" style={{ fontSize: 11 }}>{t ? `${t.aye} aye · ${t.nay} nay · ${t.abstain} abstain` : "awaiting a division"}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
-
 function charName(characters: Record<string, Character>, id?: string): string {
   return id && characters[id] ? characters[id].name : "Unnamed official";
 }
