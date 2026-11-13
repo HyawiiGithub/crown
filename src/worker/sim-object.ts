@@ -585,10 +585,13 @@ export class SimObject {
           if (askedParty && !c.parties.some((p) => p.id === askedParty)) {
             return { ok: false, message: `That party is not registered in ${c.name}` };
           }
-          if (askedParty && sponsor?.partyId && askedParty !== sponsor.partyId) {
-            return { ok: false, message: `${sponsor.name} does not sit in that party` };
+          // The sponsor's own party is the only party the bill can carry: an
+          // independent sponsor files with none, and a named party that the
+          // sponsor does not sit in is refused rather than recorded.
+          const sponsorPartyId = sponsor?.partyId ?? "";
+          if (askedParty && askedParty !== sponsorPartyId) {
+            return { ok: false, message: sponsor ? `${sponsor.name} does not sit in that party` : "Name a sponsor to file under a party" };
           }
-          const sponsorPartyId = sponsor?.partyId ?? askedParty;
           const bill = introduceBill(
             w,
             c.id,

@@ -467,6 +467,22 @@ async function main() {
   check("introduce-bill accepts the member own character", sponsored.body.ok === true, JSON.stringify(sponsored.body));
   const sponsorBill = Object.values((await json(`/api/worlds/${PUBLIC_WORLD}/snapshot`)).body.world.bills).find((b) => b.title === "Seat Sponsor Bill");
   check("the bill carries the sponsor and the party that sponsor sits in", sponsorBill?.sponsorId === ownMemberId && sponsorBill?.sponsorPartyId === espParty?.id, `${sponsorBill?.sponsorId} / ${sponsorBill?.sponsorPartyId}`);
+
+  // --- a named sponsor's own party is authoritative ---
+  const independentParty = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: owner.cookie },
+    body: JSON.stringify({ type: "introduce-bill", title: "Independent Party Bill", summary: "", body: "", category: "ordinary", sponsorId: characterId, sponsorPartyId: belParty?.id }),
+  });
+  check("introduce-bill refuses a party an independent sponsor does not sit in", independentParty.body.ok === false && /does not sit in that party/.test(String(independentParty.body.message)), JSON.stringify(independentParty.body));
+  const espSecond = (seatWorld.countries.ESP.parties ?? [])[1];
+  check("the member country has a second party to contradict", Boolean(espSecond), (seatWorld.countries.ESP.parties ?? []).map((p) => p.id).join(","));
+  const mismatch = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: players[1].cookie },
+    body: JSON.stringify({ type: "introduce-bill", title: "Mismatch Bill", summary: "", body: "", category: "ordinary", sponsorId: ownMemberId, sponsorPartyId: espSecond?.id }),
+  });
+  check("introduce-bill refuses a party the sponsor does not sit in", mismatch.body.ok === false && /does not sit in that party/.test(String(mismatch.body.message)), JSON.stringify(mismatch.body));
   const afterNaming = (await json(`/api/worlds/${PUBLIC_WORLD}/snapshot`)).body.world;
   check("the refused foreign bill filed nothing in that nation", !Object.values(afterNaming.bills).some((b) => b.title === "Foreign Bill"), Object.values(afterNaming.bills).map((b) => `${b.title}@${b.country}`).join(","));
 

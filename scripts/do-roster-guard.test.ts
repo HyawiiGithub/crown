@@ -149,6 +149,25 @@ async function main(): Promise<void> {
   const fraParty: any = (afterWorld.countries.FRA.parties ?? [])[0];
   const foreignPolitician = await (await act({ type: "create-politician", userId: "u2", name: "Party Tester", partyId: fraParty?.id })).json();
   check("create-politician refuses a party from another country", foreignPolitician.ok === false && /not registered in Spain/.test(String(foreignPolitician.message)), String(foreignPolitician.message));
+
+  // --- a named sponsor's own party is authoritative ---
+  const localParty: any = (afterWorld.countries.FRA.parties ?? [])[0];
+  const localParty2: any = (afterWorld.countries.FRA.parties ?? [])[1];
+  check("the country has a second party to contradict", Boolean(localParty2), (afterWorld.countries.FRA.parties ?? []).map((p: any) => p.id).join(","));
+  const independentParty = await (await bill({ title: "Independent Party Bill", sponsorId: ownChar?.id, sponsorPartyId: localParty?.id })).json();
+  check("introduce-bill refuses a party an independent sponsor does not sit in", independentParty.ok === false && /does not sit in that party/.test(String(independentParty.message)), String(independentParty.message));
+  const joined = await (await act({ type: "join-party", userId: "u1", partyId: localParty?.id })).json();
+  check("the sponsor can join a party", joined.ok === true, String(joined.message));
+  const mismatch = await (await bill({ title: "Mismatch Bill", sponsorId: ownChar?.id, sponsorPartyId: localParty2?.id })).json();
+  check("introduce-bill refuses a party the sponsor does not sit in", mismatch.ok === false && /does not sit in that party/.test(String(mismatch.message)), String(mismatch.message));
+  const matching = await (await bill({ title: "Matching Bill", sponsorId: ownChar?.id, sponsorPartyId: localParty?.id })).json();
+  check("introduce-bill accepts the party the sponsor sits in", matching.ok === true, String(matching.message));
+  const matched = await (await object.fetch(new Request("https://do/snapshot?worldId=1900%3Aguard"))).json();
+  const matchedWorld = matched.world ?? matched;
+  const matchBill: any = Object.values(matchedWorld.bills).find((b: any) => b.title === "Matching Bill");
+  check("the bill records the party the sponsor sits in", matchBill?.sponsorPartyId === localParty?.id, String(matchBill?.sponsorPartyId));
+  const independentBill: any = Object.values(matchedWorld.bills).find((b: any) => b.title === "Sponsor Bill");
+  check("an independent sponsor bill carries no party", independentBill?.sponsorPartyId === "", JSON.stringify(independentBill?.sponsorPartyId));
 }
 
 main()
