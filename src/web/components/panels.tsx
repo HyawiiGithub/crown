@@ -886,9 +886,28 @@ function Foreign({ c, mine }: { c: Country; mine: boolean }) {
 }
 
 function Military({ c, mine }: { c: Country; mine: boolean }) {
+  const countries = useStore((s) => s.countries);
+  const [opsTarget, setOpsTarget] = useState("");
+  const [landing, setLanding] = useState("");
+  const pick = opsTarget || (Object.values(countries).find((x) => x.id !== c.id && !x.annexedBy)?.id ?? "");
   const m = c.military;
   return (
     <div className="stack">
+      <div className="card" style={{ display: "grid", gap: 6 }}>
+        <strong style={{ fontSize: 12 }}>Operations</strong>
+        <select className="input" value={pick} onChange={(e) => setOpsTarget(e.target.value)}>
+          {Object.values(countries).filter((x) => x.id !== c.id && !x.annexedBy).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+        </select>
+        <input className="input" value={landing} onChange={(e) => setLanding(e.target.value)} placeholder="Landing site, e.g. Normandy" />
+        <div className="row row--wrap" style={{ gap: 4 }}>
+          <button className="btn btn--sm btn--primary" onClick={() => void act({ type: "naval-invasion", target: pick, place: landing })}>Naval invasion</button>
+          <button className="btn btn--sm" onClick={() => void act({ type: "special-op", target: pick, op: "sabotage" })}>Sabotage</button>
+          <button className="btn btn--sm" onClick={() => void act({ type: "special-op", target: pick, op: "decapitation" })}>Decapitation</button>
+          <button className="btn btn--sm" onClick={() => void act({ type: "special-op", target: pick, op: "interdiction" })}>Interdiction</button>
+          <button className="btn btn--sm" onClick={() => void act({ type: "special-op", target: pick, op: "recon" })}>Recon</button>
+        </div>
+        <div className="dim" style={{ fontSize: 11 }}>A landing needs a war and a navy; covert work is deniable until it is not.</div>
+      </div>
       <div className="card">
         <div className="row"><strong className="grow">Research</strong><span className="dim mono">{Math.round(c.tech?.points ?? 0)} pts</span></div>
         {(["army", "logistics", "industry"] as const).map((f) => (

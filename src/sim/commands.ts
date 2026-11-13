@@ -230,6 +230,53 @@ export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Reco
       c.executive.approval = clamp(c.executive.approval + (rulesByDecree(c.government) ? 2 : -4), 0, 100);
       return { ok: true, message: war.name };
     }
+    case "naval-invasion": {
+      const target = String(body.target ?? "");
+      const d = world.countries[target];
+      if (!d || d.id === c.id) return { ok: false, message: "Pick another country to land in." };
+      const war = Object.values(world.wars).find((w) => w.belligerents[c.id] && w.belligerents[d.id]);
+      if (!war) return { ok: false, message: `${d.name} is not at war with you. Declare war first.` };
+      const mine = c.military.branches.navy.active * (c.military.branches.navy.quality / 100);
+      const theirs = d.military.branches.navy.active * (d.military.branches.navy.quality / 100);
+      const edge = mine / Math.max(1, mine + theirs);
+      const odds = clamp(0.2 + edge * 0.95 + (c.tech?.logistics ?? 0) * 0.02, 0.05, 0.95);
+      const place = String(body.place ?? "").slice(0, 40) || d.name;
+      const cost = Math.max(1e6, e.gdp * 0.008);
+      e.fiscal.debt += cost;
+      c.military.branches.navy.active = Math.max(1, c.military.branches.navy.active * 0.95);
+      if (!rng.chance(odds)) {
+        c.military.activeDuty = Math.max(1000, c.military.activeDuty * 0.97);
+        c.military.morale = clamp(c.military.morale - 6, 0, 100);
+        pushEvent(world, { kind: "military", severity: "major", country: c.id, title: `${c.name}: landing at ${place} repulsed`, body: `The convoy was turned back short of the beaches; ${(cost / 1e9).toFixed(2)}B and a division are gone.`, tags: ["war", "invasion"] });
+        return { ok: false, message: `The landing at ${place} was repulsed.` };
+      }
+      war.fronts.push({ id: `${war.id}-landing-${war.fronts.length}`, name: `Landing at ${place}`, belligerents: [c.id, d.id], control: clamp(2 + edge * 8, 0, 20), contestedOutput: 0, openedAt: world.t, terrain: "coastal", attritionRate: 0.0006, overseas: true });
+      c.military.readiness = clamp(c.military.readiness + 3, 0, 100);
+      pushEvent(world, { kind: "military", severity: "catastrophic", country: c.id, title: `${c.name} lands at ${place}`, body: `A beachhead is open on the coast of ${d.name}. Cost so far ${(cost / 1e9).toFixed(2)}B.`, tags: ["war", "invasion"] });
+      return { ok: true, message: `Beachhead established at ${place}.` };
+    }
+    case "special-op": {
+      const target = String(body.target ?? "");
+      const d = world.countries[target];
+      const kind = String(body.op ?? "sabotage");
+      if (!d || d.id === c.id) return { ok: false, message: "Pick another country." };
+      const cost = Math.max(1e5, e.gdp * 0.0015);
+      e.fiscal.debt += cost;
+      const odds = clamp(0.32 + (c.tech?.army ?? 0) * 0.03 + (c.military.morale - 50) * 0.004 - d.cohesion * 0.002, 0.08, 0.9);
+      const ok = rng.chance(odds);
+      d.relations[c.id] = clamp((d.relations[c.id] ?? 0) - 12, -100, 100);
+      if (!ok) {
+        c.executive.approval = clamp(c.executive.approval - 3, 0, 100);
+        pushEvent(world, { kind: "military", severity: "notice", country: c.id, title: `${c.name}: operation in ${d.name} blown`, body: `The team was rolled up. ${d.name} protests and the cost (${(cost / 1e9).toFixed(2)}B) is sunk.`, tags: ["covert"] });
+        return { ok: false, message: "The operation failed and was exposed." };
+      }
+      if (kind === "sabotage") { for (const sec of d.economy.sectors) sec.capacity *= 0.96; d.economy.macro.businessConfidence = clamp(d.economy.macro.businessConfidence - 4, 0, 100); }
+      else if (kind === "decapitation") { d.executive.approval = clamp(d.executive.approval - 12, 0, 100); d.cohesion = clamp(d.cohesion - 5, 0, 100); }
+      else if (kind === "interdiction") { d.military.readiness = clamp(d.military.readiness - 10, 0, 100); d.military.morale = clamp(d.military.morale - 6, 0, 100); }
+      else { c.military.readiness = clamp(c.military.readiness + 6, 0, 100); c.military.morale = clamp(c.military.morale + 4, 0, 100); }
+      pushEvent(world, { kind: "military", severity: "major", country: c.id, title: `${c.name}: ${kind} in ${d.name}`, body: `The operation succeeded. ${d.name} blames saboteurs.`, tags: ["covert"] });
+      return { ok: true, message: `${kind} in ${d.name} succeeded.` };
+    }
     case "set-stance": {
       const war = world.wars[String(body.war)];
       const stance = String(body.stance);
