@@ -4,6 +4,7 @@ import { indexCompanies, SUPPLY } from "./firms";
 import { incomeShares, pushEvent, recomputeGlobals, taxCollected } from "./bootstrap";
 
 import { Rng, approach, clamp, clamp01 } from "./rng";
+import { isPlayerCountry } from "./seats";
 
 /**
  * The economy, stepped once per simulated week.
@@ -168,12 +169,12 @@ function stepMacro(world: World, c: Country, rnd: Rng, anchorRate: number, ancho
       rateTarget = 0.02 + Math.max(0, 0.05 - e.reserves / Math.max(1, e.gdp)) * 0.2 + e.corruption * 0.02;
       break;
     case "command":
-      rateTarget = c.id === world.playerCountry ? e.monetary.centralBankRate : taylor;
+      rateTarget = isPlayerCountry(world, c.id) ? e.monetary.centralBankRate : taylor;
       break;
     default:
-      rateTarget = cb.independent || c.id !== world.playerCountry ? taylor - (cb.independent ? 0 : 0.005) : e.monetary.centralBankRate;
+      rateTarget = cb.independent || !isPlayerCountry(world, c.id) ? taylor - (cb.independent ? 0 : 0.005) : e.monetary.centralBankRate;
   }
-  if (c.id === world.playerCountry && !cb.independent && cb.regime !== "union") rateTarget = e.monetary.centralBankRate;
+  if (isPlayerCountry(world, c.id) && !cb.independent && cb.regime !== "union") rateTarget = e.monetary.centralBankRate;
   rateTarget = clamp(rateTarget, -0.01, 40);
   const speed = P.policyRateSmoothing * 18 * dt + (Math.abs(rateTarget - e.monetary.policyRate) > 0.1 ? 0.1 : 0);
   e.monetary.policyRate = approach(e.monetary.policyRate, rateTarget, speed);
@@ -377,7 +378,7 @@ function stepMacro(world: World, c: Country, rnd: Rng, anchorRate: number, ancho
       f.debt /= 1 + cut;
       depreciation = cut / dt;
       e.reserves = e.accounts.imports * 0.3;
-      if (world.startDate.year >= 1950 || c.id === world.playerCountry) {
+      if (world.startDate.year >= 1950 || isPlayerCountry(world, c.id)) {
         pushEvent(world, { kind: "economic", severity: "major", country: c.id, title: `${c.name} devalues its currency`, body: `Reserves ran out defending the ${cb.regime === "gold" ? "gold parity" : "peg"}. The currency falls ${(cut * 100).toFixed(0)}%.`, tags: ["crisis", "currency"] });
       }
       if (cb.regime === "gold") cb.regime = "float";
@@ -391,7 +392,7 @@ function stepMacro(world: World, c: Country, rnd: Rng, anchorRate: number, ancho
     m.priceLevel /= zeros;
     m.priceHistory = m.priceHistory.map((v) => v / zeros);
     for (const h of e.households) h.costOfLiving /= zeros;
-    if (c.id === world.playerCountry || e.gdp / Math.max(1, world.globals.globalGdp) > 0.003) {
+    if (isPlayerCountry(world, c.id) || e.gdp / Math.max(1, world.globals.globalGdp) > 0.003) {
       pushEvent(world, { kind: "economic", severity: "notice", country: c.id, title: `${c.name} introduces a new currency`, body: "Zeros are knocked off the old money. Nothing real has changed.", tags: ["currency"] });
     }
   }
@@ -815,7 +816,7 @@ export function stepAnnualEconomy(world: World): void {
     co.valuationHistory = keep(co.valuationHistory, co.valuation);
   }
   for (const c of Object.values(world.countries)) {
-    if (c.annexedBy || c.id === world.playerCountry) continue;
+    if (c.annexedBy || isPlayerCountry(world, c.id)) continue;
     stepAiFiscal(c, world.startDate.year + world.t / SECONDS_PER_YEAR);
     if (c.economy.monetary.inflation > 0.4) stabilisationPlan(world, c);
   }

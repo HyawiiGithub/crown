@@ -129,6 +129,8 @@ interface Store {
   opsLanding: string;
   /** Seconds actually played in this world. */
   playSeconds: number;
+  /** World being played over the network, if any. */
+  remoteWorld: string | null;
 
   set: (p: Partial<Store>) => void;
   loadBootstrap: () => Promise<void>;
@@ -176,6 +178,7 @@ const worldInitial = {
   opsTarget: null as string | null,
   opsLanding: "",
   playSeconds: 0,
+  remoteWorld: null as string | null,
 };
 
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -359,13 +362,37 @@ export function focusCountry(country: string | null): void {
   void call({ kind: "focus", country });
 }
 
-/** Send a player command to the simulation. The first argument is kept so dev tools can share a signature. */
+type ActionReply = { ok: boolean; message: string; data?: unknown };
+
+/**
+ * Send an action to the world being played.
+ *
+ * In a hosted world an action belongs to the member's seat, so it goes to that
+ * world's Durable Object, which resolves the country from the roster; the local
+ * worker only ever runs singleplayer. The server's reply is authoritative and
+ * the socket streams the resulting state back.
+ */
+async function sendAction(body: Record<string, unknown>): Promise<ActionReply> {
+  const remote = useStore.getState().remoteWorld;
+  if (!remote) return call<ActionReply>({ kind: "command", body });
+  const res = await fetch(`/api/worlds/${encodeURIComponent(remote)}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  }).catch(() => null);
+  if (!res) return { ok: false, message: "Lost the connection to that world" };
+  const reply = (await res.json().catch(() => ({}))) as ActionReply & { error?: string };
+  if (!res.ok) return { ok: false, message: reply.error ?? `That action was refused (${res.status})` };
+  return { ok: Boolean(reply.ok), message: reply.message ?? (reply.ok ? "ok" : "That action was refused"), data: reply.data };
+}
+
+/** Send a player command to the world being played. The first argument is kept so dev tools can share a signature. */
 export async function playerAction(_worldId: string, body: Record<string, unknown>): Promise<{ ok: boolean; message: string; data?: unknown }> {
-  return call({ kind: "command", body });
+  return sendAction(body);
 }
 
 export async function act(body: Record<string, unknown>): Promise<{ ok: boolean; message: string; data?: unknown }> {
-  const r = await call<{ ok: boolean; message: string; data?: unknown }>({ kind: "command", body });
+  const r = await sendAction(body);
   useStore.getState().toast(r.message, r.ok ? "ok" : "err");
   return r;
 }
@@ -407,4 +434,56 @@ export function isDevUser(u: User | null): boolean {
 
 export function isStaffUser(u: User | null): boolean {
   return isDevUser(u) || u?.staffRole === "moderator";
+}
+
+/** The socket for a world played over the network. */
+let remoteSocket: WebSocket | null = null;
+
+/** Join a world's roster and attach to its live stream. */
+export async function joinMultiplayer(id: string, country?: string): Promise<void> {
+  const store = useStore.getState();
+  store.set({ connection: "connecting" });
+  const joined = await fetch(`/api/worlds/${encodeURIComponent(id)}/join`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(country ? { country } : {}),
+  });
+  if (!joined.ok) {
+    const why = (await joined.json().catch(() => ({}))) as { error?: string };
+    store.set({ connection: "idle" });
+    store.toast(joined.status === 401 ? "Sign in to join a world" : why.error ?? "Could not join that world", "err");
+    return;
+  }
+  const { url } = (await fetch(`/api/worlds/${encodeURIComponent(id)}/socket-url`).then((r) => r.json())) as { url: string };
+  remoteSocket?.close();
+  const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+  const socket = new WebSocket(`${scheme}//${location.host}${url}`);
+  remoteSocket = socket;
+  socket.onopen = () => {
+    useStore.setState({ remoteWorld: id, connection: "live" });
+    useStore.getState().toast("You are in the world");
+  };
+  socket.onmessage = (ev) => {
+    try {
+      const msg = JSON.parse(String(ev.data)) as { type?: string; world?: never } & Record<string, unknown>;
+      if (msg.type === "snapshot" && msg.world) adoptWorld(msg.world);
+      else if (msg.type === "patch") applyPatch(msg as never);
+    } catch (err) {
+      // A malformed frame is not worth crashing the socket, but a frame that
+      // fails to apply is a bug worth seeing.
+      console.warn("Could not apply a world frame", err);
+    }
+  };
+  socket.onclose = () => {
+    remoteSocket = null;
+    useStore.setState({ remoteWorld: null, connection: "idle" });
+  };
+  socket.onerror = () => useStore.getState().toast("Lost the connection to that world", "err");
+}
+
+/** Detach from a networked world without touching local saves. */
+export function leaveMultiplayer(): void {
+  remoteSocket?.close();
+  remoteSocket = null;
+  useStore.setState({ remoteWorld: null });
 }

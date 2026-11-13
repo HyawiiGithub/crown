@@ -23,13 +23,17 @@ import { introduceBill } from "../sim/step-politics";
 import {
   appointMinister,
   campaign,
+  characterForUserInCountry,
   createPolitician,
   foundParty,
   joinParty,
   runForOffice,
   type CampaignKind,
 } from "../sim/politics-players";
+import type { Capability, StaffRole } from "../shared/types";
 import { runDevOp } from "../sim/dev-ops";
+import { runCommand } from "../sim/commands";
+import { ACTION_CAPABILITIES, capabilitiesFor } from "./capabilities";
 import { pushEvent, recomputeGlobals } from "../sim/bootstrap";
 import { Rng, clamp } from "../sim/rng";
 
@@ -96,11 +100,18 @@ export class SimObject {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    // Bind the object to one world, once. A later request naming a different
+    // world is refused rather than served, so an object can never act as another.
+    const bound = await this.bindWorld(url);
+    if (!bound) return json({ error: "This object serves a different world" }, 409);
+    this.bootId = bound;
     const self = this.ctx;
 
     switch (url.pathname) {
       case "/init":
         return json(await this.init(url));
+      case "/start":
+        return json(await this.start(request));
       case "/snapshot":
         return json(await this.snapshot());
       case "/patch":
@@ -108,7 +119,7 @@ export class SimObject {
       case "/join":
         return this.handleWebSocket(request);
       case "/action":
-        return json(await this.action(request));
+        return this.action(request);
       case "/dev":
         return json(await this.dev(request));
       case "/checkpoint":
@@ -139,6 +150,37 @@ export class SimObject {
   // Boot
   // =========================================================================
 
+  /**
+   * The world id is the name this object was addressed by (`idFromName`).
+   * `ctx.id.toString()` is only a hash of it and cannot identify a scenario.
+   */
+  private bootId: string | null = null;
+
+  /**
+   * Epoch ms the clock resumes. 0 means running, Infinity means a lobby that no
+   * host has started yet. The tick loop reads it; nothing else advances time.
+   */
+  private holdUntil = 0;
+
+  /**
+   * The world this object serves.
+   *
+   * The first request to name a world stamps it into durable storage; from then
+   * on that stamp wins, so a caller cannot address one object while naming a
+   * different world. `ctx.id` alone is a hash in this runtime, so storage is the
+   * only authoritative record.
+   */
+  private async bindWorld(url: URL): Promise<string | null> {
+    const wanted = url.searchParams.get("worldId");
+    const stored = await this.ctx.storage.get<string>("worldId");
+    if (stored && wanted && stored !== wanted) return null;
+    if (!stored && wanted) await this.ctx.storage.put("worldId", wanted);
+    return stored ?? wanted ?? this.ctx.id.name ?? this.ctx.id.toString();
+  }
+
+  private worldId(): string {
+    return this.bootId ?? this.ctx.id.name ?? this.ctx.id.toString();
+  }
   private async load(id: string): Promise<void> {
     if (this.world) return;
 
@@ -156,6 +198,20 @@ export class SimObject {
     }
 
     this.engine = new SimEngine(this.world);
+    // A world created as a lobby holds its clock until its host starts it, and a
+    // countdown holds it until it runs out. Worlds from before the lobby existed
+    // (lobby = 0, no start time) keep running exactly as they did.
+    const gate = await this.env.DB
+      .prepare(`SELECT lobby, starts_at FROM worlds WHERE id = ?`)
+      .bind(id)
+      .first<{ lobby: number; starts_at: number | null }>()
+      .catch(() => null);
+    if (!gate) this.holdUntil = 0;
+    else if (gate.starts_at) this.holdUntil = gate.starts_at > Date.now() ? Number(gate.starts_at) : 0;
+    else this.holdUntil = gate.lobby ? Infinity : 0;
+    // Worlds are built paused. A host who started one has released it, so the
+    // gate is the authority even after the object is evicted and reloaded.
+    if (!this.holdUntil && gate?.starts_at) this.world.paused = false;
     if (!this.world.ticker.length) recomputeGlobals(this.world);
     this.ensureRunning();
   }
@@ -183,7 +239,7 @@ export class SimObject {
   }
 
   private async init(url: URL): Promise<InitResult> {
-    const id = url.searchParams.get("worldId") ?? this.ctx.id.toString();
+    const id = url.searchParams.get("worldId") ?? this.worldId();
     const name = url.searchParams.get("name");
     await this.load(id);
     const w = this.world!;
@@ -200,6 +256,13 @@ export class SimObject {
 
   private async doTick(): Promise<void> {
     if (!this.engine || !this.world) return;
+    // The lobby and its countdown hold the clock: no tick until it is released.
+    if (this.holdUntil && Date.now() < this.holdUntil) return;
+    if (this.holdUntil) {
+      this.holdUntil = 0;
+      this.world.paused = false;
+      pushEvent(this.world, { kind: "system", severity: "notice", title: `${this.world.name}: the clock starts`, body: "The host started the world.", tags: ["system", "start"] });
+    }
     try {
       this.engine.tick(TICK_MS / 1000);
       this.dirtySince = Date.now();
@@ -263,12 +326,12 @@ export class SimObject {
   }
 
   private async patch(): Promise<PatchPayload> {
-    await this.load(this.ctx.id.toString());
+    await this.load(this.worldId());
     return this.buildPatch();
   }
 
   private async snapshot(): Promise<{ world: World; users: OnlineUser[]; chat: ChatMessage[] }> {
-    await this.load(this.ctx.id.toString());
+    await this.load(this.worldId());
     return { world: this.world!, users: this.onlineUsers(), chat: this.chat };
   }
 
@@ -291,14 +354,8 @@ export class SimObject {
     this.ctx.acceptWebSocket(server);
     this.subs.set(server, { socket: server, userId, username, avatar, staffRole, country, lastSeen: Date.now() });
 
-    server.addEventListener("message", (ev) => void this.onMessage(server, String(ev.data)));
-    server.addEventListener("close", () => {
-      this.subs.delete(server);
-      this.broadcast(JSON.stringify({ type: "presence", users: this.onlineUsers() }));
-    });
-    server.addEventListener("error", () => this.subs.delete(server));
 
-    void this.load(this.ctx.id.toString()).then(() => {
+    void this.load(this.worldId()).then(() => {
       try {
         server.send(JSON.stringify({ type: "snapshot", world: this.world, users: this.onlineUsers() }));
         this.broadcast(JSON.stringify({ type: "presence", users: this.onlineUsers() }));
@@ -309,6 +366,22 @@ export class SimObject {
 
     void client;
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  /** Hibernation-API entry point for a frame from a subscriber. */
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    const raw = typeof message === "string" ? message : new TextDecoder().decode(message);
+    await this.onMessage(ws, raw);
+  }
+
+  /** Hibernation-API entry point for a dropped subscriber. */
+  async webSocketClose(ws: WebSocket): Promise<void> {
+    this.subs.delete(ws);
+    this.broadcast(JSON.stringify({ type: "presence", users: this.onlineUsers() }));
+  }
+
+  async webSocketError(ws: WebSocket): Promise<void> {
+    this.subs.delete(ws);
   }
 
   private async onMessage(ws: WebSocket, raw: string): Promise<void> {
@@ -381,10 +454,86 @@ export class SimObject {
   // Player actions
   // =========================================================================
 
-  private async action(request: Request): Promise<{ ok: boolean; message: string; data?: unknown }> {
+  private async action(request: Request): Promise<Response> {
     const body = (await request.json()) as { type: string; userId?: string; [k: string]: unknown };
-    await this.load(this.ctx.id.toString());
+    const worldId = this.worldId();
+    const userId = String(body.userId ?? "").trim();
+    if (!userId) return json({ ok: false, message: "Sign in before acting in a world" }, 401);
+
+    // The Worker checks the roster before forwarding anything. The object checks
+    // it again because it is the thing that owns the world: a caller that
+    // reaches it another way still cannot act in a world it never joined, and a
+    // failed check refuses rather than allows.
+    let member: { staff_role: string; capabilities_json: string | null } | null;
+    try {
+      member = await this.env.DB.prepare(
+        `SELECT u.staff_role, u.capabilities_json FROM world_members m JOIN users u ON u.id = m.user_id WHERE m.world_id = ? AND m.user_id = ?`,
+      )
+        .bind(worldId, userId)
+        .first<{ staff_role: string; capabilities_json: string | null }>();
+    } catch (err) {
+      console.error("roster check failed", err);
+      return json({ ok: false, message: "The world is unavailable" }, 503);
+    }
+    if (!member) return json({ ok: false, message: "Join this world before acting in it" }, 403);
+
+    let extra: Capability[] = [];
+    try {
+      extra = JSON.parse(String(member.capabilities_json ?? "[]")) as Capability[];
+    } catch {
+      extra = [];
+    }
+    const caps = capabilitiesFor(String(member.staff_role ?? "player") as StaffRole, extra);
+    return json(await this.applyAction(body, caps));
+  }
+
+  /**
+   * The country this member holds here, or null if they have not taken one.
+   *
+   * The world keeps its own record of seats so a command never has to trust a
+   * country sent by the client; a reservation made at join is adopted on the
+   * member's first action.
+   */
+  private async seatFor(worldId: string, userId: string, w: World): Promise<string | null> {
+    w.seats ??= {};
+    const known = w.seats[userId];
+    if (known && w.countries[known]) return known;
+    const row = await this.env.DB.prepare(`SELECT plays_country FROM world_members WHERE world_id = ? AND user_id = ?`)
+      .bind(worldId, userId)
+      .first<{ plays_country: string | null }>()
+      .catch(() => null);
+    const reserved = row?.plays_country ?? null;
+    if (!reserved || !w.countries[reserved]) return null;
+    w.seats[userId] = reserved;
+    return reserved;
+  }
+
+  /**
+   * The country a country-naming action applies to.
+   *
+   * The seat is authoritative: an action naming another country is refused, and
+   * one naming none takes the seat. Naming a nation another member holds is
+   * refused with that hold named, so a reservation cannot be used by proxy.
+   */
+  private actAs(w: World, seat: string | null, asked: unknown): { country?: string; refusal?: string } {
+    const named = String(asked ?? "").trim().toUpperCase();
+    if (!named) {
+      return seat ? { country: seat } : { refusal: "Claim a country before acting for one" };
+    }
+    if (seat && named === seat) return { country: seat };
+    if (Object.values(w.seats ?? {}).includes(named)) return { refusal: `${named} is held by another member` };
+    return { refusal: seat ? `You can only act for the country you hold (${seat})` : "Claim a country before acting for one" };
+  }
+
+  private async applyAction(body: { type: string; userId?: string; [k: string]: unknown }, caps: Capability[]): Promise<{ ok: boolean; message: string; data?: unknown }> {
+    await this.load(this.worldId());
     const w = this.world!;
+    // One table for both the named actions and the world commands they can reach.
+    const needed = ACTION_CAPABILITIES[body.type];
+    if (!needed) return { ok: false, message: `Unknown action "${body.type}"` };
+    if (!caps.includes(needed)) return { ok: false, message: `Missing capability: ${needed}` };
+    const actor = String(body.userId ?? "");
+    const seat = await this.seatFor(this.worldId(), actor, w);
 
     try {
       switch (body.type) {
@@ -395,21 +544,83 @@ export class SimObject {
           if (c.annexedBy) return { ok: false, message: `${c.name} no longer exists` };
           if (c.overlord) return { ok: false, message: `${c.name} is a possession of ${w.countries[c.overlord]?.name ?? c.overlord}` };
           if (!c.legislature && !w.companies) return { ok: false, message: "Nothing to run here" };
-                    pushEvent(w, { kind: "political", severity: "info", country: iso3, title: `${body.username ?? "A player"} takes the reins in ${c.name}`, body: `The government of ${c.name} is now in human hands.`, byUserId: body.userId, tags: ["player"] });
+          // One seat per nation: the reservation taken at join is what refuses
+          // everyone else, and a claim moves the claimant's own seat here.
+          const userId = String(body.userId ?? "");
+          let holder: { user_id: string } | null;
+          try {
+            holder = await this.env.DB.prepare(`SELECT user_id FROM world_members WHERE world_id = ? AND plays_country = ?`)
+              .bind(this.worldId(), iso3)
+              .first<{ user_id: string }>();
+          } catch {
+            return { ok: false, message: "Could not check who holds that country" };
+          }
+          if (holder && holder.user_id !== userId) return { ok: false, message: `${c.name} is already played by another member` };
+          if (!holder) {
+            try {
+              await this.env.DB.prepare(`UPDATE world_members SET plays_country = ? WHERE world_id = ? AND user_id = ?`)
+                .bind(iso3, this.worldId(), userId)
+                .run();
+            } catch (err) {
+              if (/UNIQUE constraint failed/i.test(String(err))) return { ok: false, message: `${c.name} is already played by another member` };
+              return { ok: false, message: "Could not reserve that country" };
+            }
+          }
+          pushEvent(w, { kind: "political", severity: "info", country: iso3, title: `${body.username ?? "A player"} takes the reins in ${c.name}`, body: `The government of ${c.name} is now in human hands.`, byUserId: body.userId, tags: ["player"] });
+          w.seats ??= {};
+          w.seats[userId] = iso3;
           return { ok: true, message: `You now govern ${c.name}` };
         }
         case "vote": {
           const billId = String(body.billId ?? "");
           const bill = w.bills[billId];
           if (!bill) return { ok: false, message: "That bill no longer exists" };
-          if (bill.country !== body.country) return { ok: false, message: "That is another country's bill" };
-          bill.votes.push({ legislatorId: String(body.legislatorId ?? ""), partyId: String(body.partyId ?? ""), choice: body.choice as "aye" | "nay" });
-          return { ok: true, message: "Vote recorded" };
+          if (bill.status !== "introduced" && bill.status !== "in-committee") {
+            return { ok: false, message: "That bill is no longer open to votes" };
+          }
+          if (body.country !== undefined && String(body.country) !== bill.country) {
+            return { ok: false, message: "That is another country's bill" };
+          }
+          // The seat is the sender's character in the bill's country. A caller
+          // cannot name a seat: whatever legislatorId and partyId arrive are
+          // ignored, so one member cannot vote as another legislator or twice.
+          const voter = characterForUserInCountry(w, actor, bill.country);
+          if (!voter) return { ok: false, message: "You hold no seat in that country" };
+          const choice = String(body.choice ?? "");
+          if (choice !== "aye" && choice !== "nay" && choice !== "abstain" && choice !== "present") {
+            return { ok: false, message: "Vote aye, nay, abstain or present" };
+          }
+          if (bill.votes.some((v) => v.legislatorId === voter.id)) {
+            return { ok: false, message: `${voter.name} has already voted on this bill` };
+          }
+          bill.votes.push({ legislatorId: voter.id, partyId: voter.partyId ?? "", choice });
+          return { ok: true, message: `Vote recorded for ${voter.name}` };
         }
         case "introduce-bill": {
-          const c = w.countries[String(body.country ?? "")];
+          const target = this.actAs(w, seat, body.country);
+          if (target.refusal) return { ok: false, message: target.refusal };
+          const c = w.countries[target.country!];
           if (!c?.legislature) return { ok: false, message: "No legislature there" };
           const chamber = c.legislature.chambers[0];
+          // The sponsor and their party are politicians of the country the bill
+          // sits in: a member files under their own character, or a name from this
+          // country, never a foreign one.
+          const askedSponsor = String(body.sponsorId ?? "").trim();
+          const sponsor = askedSponsor ? w.characters[askedSponsor] : characterForUserInCountry(w, actor, c.id);
+          if (askedSponsor && (!sponsor || sponsor.country !== c.id)) {
+            return { ok: false, message: `That sponsor is not a politician in ${c.name}` };
+          }
+          const askedParty = String(body.sponsorPartyId ?? "").trim();
+          if (askedParty && !c.parties.some((p) => p.id === askedParty)) {
+            return { ok: false, message: `That party is not registered in ${c.name}` };
+          }
+          // The sponsor's own party is the only party the bill can carry: an
+          // independent sponsor files with none, and a named party that the
+          // sponsor does not sit in is refused rather than recorded.
+          const sponsorPartyId = sponsor?.partyId ?? "";
+          if (askedParty && askedParty !== sponsorPartyId) {
+            return { ok: false, message: sponsor ? `${sponsor.name} does not sit in that party` : "Name a sponsor to file under a party" };
+          }
           const bill = introduceBill(
             w,
             c.id,
@@ -418,8 +629,8 @@ export class SimObject {
               summary: String(body.summary ?? ""),
               body: String(body.body ?? ""),
               category: (body.category as "money" | "ordinary" | "constitutional" | "emergency") ?? "ordinary",
-              sponsorId: String(body.sponsorId ?? ""),
-              sponsorPartyId: String(body.sponsorPartyId ?? ""),
+              sponsorId: sponsor?.id ?? "",
+              sponsorPartyId,
               chamberId: chamber.id,
               passageChambers: c.legislature.chambers.map((x) => x.id),
               effects: (body.effects as never) ?? {},
@@ -433,11 +644,14 @@ export class SimObject {
           return bill ? { ok: true, message: "Bill introduced" } : { ok: false, message: "Could not introduce" };
         }
         case "set-policy": {
-          const c = w.countries[String(body.country ?? "")];
-          const area = String(body.area ?? "") as keyof typeof c.policies;
-          if (!c || !(area in c.policies)) return { ok: false, message: "Unknown policy area" };
-          c.policies[area] = clamp(Number(body.value ?? 0), -100, 100);
-          return { ok: true, message: `${area} policy set to ${c.policies[area]}` };
+          if (!seat) return { ok: false, message: "Claim a country before changing its policy" };
+          const held = w.countries[seat];
+          if (!held) return { ok: false, message: "That country is not in this world" };
+          if (body.country !== undefined && String(body.country) !== seat) return { ok: false, message: "You can only act for the country you hold" };
+          const area = String(body.area ?? "") as keyof typeof held.policies;
+          if (!(area in held.policies)) return { ok: false, message: "Unknown policy area" };
+          held.policies[area] = clamp(Number(body.value ?? 0), -100, 100);
+          return { ok: true, message: `${seat}: ${area} policy set to ${held.policies[area]}` };
         }
         case "trade": {
           const co = w.companies[String(body.companyId ?? "")];
@@ -449,7 +663,9 @@ export class SimObject {
           return { ok: out.ok, message: out.message };
         }
         case "raise-referendum": {
-          const c = w.countries[String(body.country ?? "")];
+          const target = this.actAs(w, seat, body.country);
+          if (target.refusal) return { ok: false, message: target.refusal };
+          const c = w.countries[target.country!];
           if (!c) return { ok: false, message: "No such country" };
           c.referendums.push({
             id: `ref-${c.id}-${Math.round(w.t)}`,
@@ -469,7 +685,9 @@ export class SimObject {
           return { ok: true, message: "Referendum called" };
         }
         case "found-company": {
-          const c = w.countries[String(body.country ?? "")];
+          const target = this.actAs(w, seat, body.country);
+          if (target.refusal) return { ok: false, message: target.refusal };
+          const c = w.countries[target.country!];
           if (!c) return { ok: false, message: "No such country" };
           const name = String(body.name ?? "New Venture");
           const id = `co-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Math.round(w.t)}`;
@@ -511,13 +729,22 @@ export class SimObject {
         case "create-politician": {
           const userId = String(body.userId ?? "");
           if (!userId) return { ok: false, message: "Sign in first" };
+          const target = this.actAs(w, seat, body.country);
+          if (target.refusal) return { ok: false, message: target.refusal };
+          const home = w.countries[target.country!];
+          if (!home) return { ok: false, message: "No such country" };
+          const askedParty = body.partyId ? String(body.partyId).trim() : "";
+          const party = askedParty ? home.parties.find((p) => p.id === askedParty) : undefined;
+          if (askedParty && !party) {
+            return { ok: false, message: `That party is not registered in ${home.name}` };
+          }
           const out = createPolitician(w, {
             userId,
             username: String(body.username ?? "Citizen"),
             name: String(body.name ?? ""),
-            country: String(body.country ?? ""),
-            partyId: body.partyId ? String(body.partyId) : undefined,
-          });
+            country: home.id,
+            partyId: party?.id,
+          }, this.rng!);
           return { ok: out.ok, message: out.message, data: out.character ? { characterId: out.character.id } : undefined };
         }
         case "join-party": {
@@ -525,40 +752,46 @@ export class SimObject {
           return { ok: out.ok, message: out.message };
         }
         case "found-party": {
-          const out = foundParty(w, String(body.userId ?? ""), String(body.name ?? ""), String(body.abbreviation ?? ""));
+          const out = foundParty(w, String(body.userId ?? ""), String(body.name ?? ""), String(body.abbreviation ?? ""), this.rng!);
           return { ok: out.ok, message: out.message };
         }
         case "run-for-office": {
           const office = String(body.office ?? "") as ElectionOffice;
           const allowed: ElectionOffice[] = ["chamber", "head-of-state", "head-of-government", "party-leader"];
           if (!allowed.includes(office)) return { ok: false, message: "Choose an office to contest" };
+          const target = this.actAs(w, seat, body.country);
+          if (target.refusal) return { ok: false, message: target.refusal };
           const out = runForOffice(w, {
             userId: String(body.userId ?? ""),
-            country: String(body.country ?? ""),
+            country: target.country!,
             office,
             chamberId: body.chamberId ? String(body.chamberId) : undefined,
             partyId: body.partyId ? String(body.partyId) : undefined,
-          });
+          }, this.rng!);
           return { ok: out.ok, message: out.message, data: out.electionId ? { electionId: out.electionId } : undefined };
         }
         case "campaign": {
           const kind = String(body.kind ?? "rally") as CampaignKind;
           if (!["rally", "ads", "ground", "debate"].includes(kind)) return { ok: false, message: "Unknown campaign activity" };
-          const out = campaign(w, String(body.userId ?? ""), String(body.electionId ?? ""), kind);
+          const out = campaign(w, String(body.userId ?? ""), String(body.electionId ?? ""), kind, this.rng!);
           return { ok: out.ok, message: out.message, data: out.delta === undefined ? undefined : { delta: out.delta } };
         }
-        case "appoint-minister":
-          return appointMinister(
-            w,
-            String(body.userId ?? ""),
-            String(body.country ?? ""),
-            String(body.area ?? "") as never,
-            String(body.characterId ?? ""),
-          );
+        case "appoint-minister": {
+          const target = this.actAs(w, seat, body.country);
+          if (target.refusal) return { ok: false, message: target.refusal };
+          return appointMinister(w, String(body.userId ?? ""), target.country!, String(body.area ?? "") as never, String(body.characterId ?? ""));
+        }
         case "chat-history":
           return { ok: true, message: "ok", data: this.chat };
-        default:
-          return { ok: false, message: `Unknown action "${body.type}"` };
+        default: {
+          // Everything else is a world command, and it acts on the country
+          // this member holds. The shared clock is not a player lever.
+          if (body.type === "advance" || body.type === "set-speed") {
+            return { ok: false, message: "Only a developer can move a world's clock" };
+          }
+          if (!this.engine || !this.rng) return { ok: false, message: "The world is not running yet" };
+          return runCommand(w, this.engine, this.rng, body, seat ?? undefined);
+        }
       }
     } catch (err) {
       return { ok: false, message: err instanceof Error ? err.message : "Action failed" };
@@ -571,7 +804,7 @@ export class SimObject {
 
   private async dev(request: Request): Promise<{ ok: boolean; message: string; data?: unknown }> {
     const body = (await request.json()) as { op: string; actor?: { id: string; username: string }; [k: string]: unknown };
-    await this.load(this.ctx.id.toString());
+    await this.load(this.worldId());
     const w = this.world!;
     const actor = body.actor ?? { id: "system", username: "system" };
 
@@ -595,6 +828,16 @@ export class SimObject {
   // =========================================================================
   // Persistence
   // =========================================================================
+
+  /** Release the clock at a host's chosen moment. 0 means start now. */
+  private async start(request: Request): Promise<{ ok: boolean; startsAt: number }> {
+    await this.load(this.worldId());
+    const body = (await request.json().catch(() => ({}))) as { startsAt?: number };
+    const asked = Number(body.startsAt ?? 0);
+    this.holdUntil = Number.isFinite(asked) && asked > Date.now() ? asked : 0;
+    if (this.world && this.holdUntil === 0) this.world.paused = false;
+    return { ok: true, startsAt: this.holdUntil };
+  }
 
   private async checkpoint(): Promise<{ ok: boolean; bytes: number }> {
     if (!this.world || !this.rng) return { ok: false, bytes: 0 };

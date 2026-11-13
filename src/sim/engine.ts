@@ -87,7 +87,7 @@ export class SimEngine {
         stepSupply(w);
         stepMobilisation(w);
         stepDiplomacy(w, this.rng, 7 * DAY);
-        applyDirectives(w, 7 * DAY);
+        applyDirectives(w, 7 * DAY, this.rng);
         recomputeGlobals(w);
       }
       if (w.dayCount % HISTORY_EVERY_DAYS === 0) recordHistory(w);

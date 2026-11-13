@@ -24,7 +24,7 @@ import { Rng, clamp } from "./rng";
 // Directives
 // ===========================================================================
 
-export function applyDirectives(world: World, dt: number): void {
+export function applyDirectives(world: World, dt: number, rnd: Rng): void {
   for (const d of world.directives) {
     if (!d.enabled) continue;
     switch (d.kind) {
@@ -56,7 +56,7 @@ export function applyDirectives(world: World, dt: number): void {
         break;
       }
       case "custom-rule": {
-        evaluateRule(world, d.rule, dt);
+        evaluateRule(world, d.rule, dt, rnd);
         break;
       }
     }
@@ -84,7 +84,7 @@ function resolveTarget(world: World, scope: string, id: string): { obj: unknown 
 // Custom rules
 // ===========================================================================
 
-export function evaluateRule(world: World, rule: CustomRule, dt: number): void {
+export function evaluateRule(world: World, rule: CustomRule, dt: number, rnd: Rng): void {
   if (!rule.enabled) return;
   if (rule.maxFires >= 0 && rule.fired >= rule.maxFires) return;
   if (rule.lastFiredAt && world.t - rule.lastFiredAt < rule.cooldownMs / 1000) return;
@@ -100,7 +100,7 @@ export function evaluateRule(world: World, rule: CustomRule, dt: number): void {
       due = !rule.lastFiredAt || now - rule.lastFiredAt >= (t.intervalSeconds ?? 3600);
       break;
     case "random":
-      due = Math.random() < (t.probability ?? 0.1);
+      due = rnd.chance(t.probability ?? 0.1);
       break;
     case "threshold":
       due = t.conditions.every((c) => evaluateCondition(world, c));

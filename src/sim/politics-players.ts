@@ -142,9 +142,9 @@ export function ensureCandidates(world: World, c: Country, el: Election): void {
   void c;
 }
 
-function openElection(world: World, c: Country, office: ElectionOffice, chamberId?: string, partyId?: string): Election {
+function openElection(world: World, c: Country, rng: Rng, office: ElectionOffice, chamberId?: string, partyId?: string): Election {
   const chamber = office === "chamber" ? c.legislature?.chambers.find((ch) => ch.id === chamberId) ?? defaultChamber(c) : undefined;
-  const id = `elec-${c.id}-${office}-${Math.round(world.t)}-${Math.round(Math.random() * 1e5)}`;
+  const id = `elec-${c.id}-${office}-${Math.round(world.t)}-${rng.int(0, 100000)}`;
   const districtCount = clamp(Math.round(Math.log10(Math.max(10, c.economy.population)) * 34), 6, 180);
   const populationWeights: number[] = [];
   for (let i = 0; i < districtCount; i++) populationWeights.push(1 / districtCount);
@@ -184,7 +184,7 @@ export interface CreatePoliticianInput {
   partyId?: string;
 }
 
-export function createPolitician(world: World, input: CreatePoliticianInput): { ok: boolean; message: string; character?: Character } {
+export function createPolitician(world: World, input: CreatePoliticianInput, rng: Rng): { ok: boolean; message: string; character?: Character } {
   const c = world.countries[input.country];
   if (!c) return { ok: false, message: "No such country" };
   if (c.annexedBy) return { ok: false, message: `${c.name} no longer exists` };
@@ -205,7 +205,7 @@ export function createPolitician(world: World, input: CreatePoliticianInput): { 
     partyId: party?.id,
     stats: {
       competence: 45,
-      charisma: 42 + Math.round(Math.random() * 20),
+      charisma: 42 + rng.int(0, 20),
       integrity: 55,
       ambition: 70,
       ideology: Math.round(ideology),
@@ -267,7 +267,7 @@ export function joinParty(world: World, userId: string, partyId: string): { ok: 
   return { ok: true, message: `You joined ${party.name}` };
 }
 
-export function foundParty(world: World, userId: string, rawName: string, rawAbbr: string): { ok: boolean; message: string } {
+export function foundParty(world: World, userId: string, rawName: string, rawAbbr: string, rng: Rng): { ok: boolean; message: string } {
   const ch = findPlayerCharacter(world, userId);
   if (!ch) return { ok: false, message: "Create your politician first" };
   const c = world.countries[ch.country];
@@ -288,7 +288,7 @@ export function foundParty(world: World, userId: string, rawName: string, rawAbb
   const ideology = ch.stats.ideology;
   const template = c.parties[0]?.platform;
   const platform = Object.fromEntries(
-    Object.keys(template ?? c.policies).map((key) => [key, clamp(ideology + (Math.random() * 20 - 10), -100, 100)]),
+    Object.keys(template ?? c.policies).map((key) => [key, clamp(ideology + rng.float(-10, 10), -100, 100)]),
   ) as Record<PolicyArea, number>;
 
   const palette = ["#c9a227", "#7c3aed", "#0ea5e9", "#16a34a", "#dc2626", "#f59e0b", "#14b8a6", "#ec4899"];
@@ -300,7 +300,7 @@ export function foundParty(world: World, userId: string, rawName: string, rawAbb
     ideology,
     cohesion: 72,
     popularity: 4,
-    color: palette[Math.floor(Math.random() * palette.length)],
+    color: palette[rng.int(0, palette.length - 1)],
     leaderId: ch.id,
     seats: Object.fromEntries((c.legislature?.chambers ?? []).map((chamber) => [chamber.id, 0])),
     treasury: 200_000,
@@ -342,7 +342,7 @@ export interface RunForOfficeInput {
   partyId?: string;
 }
 
-export function runForOffice(world: World, input: RunForOfficeInput): { ok: boolean; message: string; electionId?: string } {
+export function runForOffice(world: World, input: RunForOfficeInput, rng: Rng): { ok: boolean; message: string; electionId?: string } {
   const ch = characterForUserInCountry(world, input.userId, input.country);
   if (!ch) return { ok: false, message: "Create your politician in this country first" };
   const c = world.countries[input.country];
@@ -363,22 +363,22 @@ export function runForOffice(world: World, input: RunForOfficeInput): { ok: bool
     if (!chamber) return { ok: false, message: "This country has no chamber to contest" };
     if (!canHoldElections(c)) return { ok: false, message: "Elections are suspended here" };
     el = c.elections.find((e) => (e.office ?? "chamber") === "chamber" && e.chamberId === chamber.id && e.status !== "complete");
-    if (!el) el = openElection(world, c, "chamber", chamber.id);
+    if (!el) el = openElection(world, c, rng, "chamber", chamber.id);
   } else if (input.office === "head-of-state") {
     el = c.elections.find((e) => e.office === "head-of-state" && e.status !== "complete");
-    if (!el) el = openElection(world, c, "head-of-state");
+    if (!el) el = openElection(world, c, rng, "head-of-state");
   } else if (input.office === "head-of-government") {
     const party = ch.partyId ? world.parties[ch.partyId] : undefined;
     if (!party) return { ok: false, message: "Join a party before seeking the government" };
     el = c.elections.find((e) => e.office === "party-leader" && e.partyId === party.id && e.status !== "complete");
-    if (!el) el = openElection(world, c, "party-leader", undefined, party.id);
+    if (!el) el = openElection(world, c, rng, "party-leader", undefined, party.id);
   } else if (input.office === "party-leader") {
     const party = input.partyId ? world.parties[input.partyId] : ch.partyId ? world.parties[ch.partyId] : undefined;
     if (!party) return { ok: false, message: "Join a party before running for its leadership" };
     if (party.country !== c.id) return { ok: false, message: "That party is in another country" };
     if (party.leaderId === ch.id) return { ok: false, message: "You already lead this party" };
     el = c.elections.find((e) => e.office === "party-leader" && e.partyId === party.id && e.status !== "complete");
-    if (!el) el = openElection(world, c, "party-leader", undefined, party.id);
+    if (!el) el = openElection(world, c, rng, "party-leader", undefined, party.id);
     ch.partyId = party.id;
   } else {
     return { ok: false, message: "Unknown office" };
@@ -432,7 +432,7 @@ function officeLabel(c: Country, el: Election, party?: Party): string {
   return c.legislature?.chambers.find((ch) => ch.id === el.chamberId)?.name ?? "the chamber";
 }
 
-export function campaign(world: World, userId: string, electionId: string, kind: CampaignKind): { ok: boolean; message: string; delta?: number } {
+export function campaign(world: World, userId: string, electionId: string, kind: CampaignKind, rng: Rng): { ok: boolean; message: string; delta?: number } {
   const ch = findPlayerCharacter(world, userId);
   if (!ch) return { ok: false, message: "Create your politician first" };
   const c = world.countries[ch.country];
@@ -454,7 +454,7 @@ export function campaign(world: World, userId: string, electionId: string, kind:
   const competence = clamp01((ch.stats.competence + 100) / 200);
   const party = ch.partyId ? world.parties[ch.partyId] : undefined;
   const partyPull = (party?.popularity ?? 5) / 100;
-  const noise = Math.random() * 3 - 1;
+  const noise = rng.float(-1, 2);
   let gain = 0;
   let momentum = 8;
 
@@ -470,7 +470,7 @@ export function campaign(world: World, userId: string, electionId: string, kind:
     momentum = 11;
     el.enthusiasm = clamp(el.enthusiasm + 0.9, 5, 98);
   } else {
-    gain = 0.5 + charisma * 5 + competence * 3 + (Math.random() < 0.45 ? 4.5 : -3.2);
+    gain = 0.5 + charisma * 5 + competence * 3 + (rng.chance(0.45) ? 4.5 : -3.2);
     momentum = 18;
   }
 
@@ -549,7 +549,7 @@ export function stepPlayerPolitics(world: World, rnd: Rng): void {
       for (const cand of el.candidates ?? []) {
         if (cand.isPlayer) {
           cand.momentum = approach(cand.momentum, 0, 0.004 * Math.max(1, el.districtCount));
-        } else if (Math.random() < 0.02) {
+        } else if (rnd.chance(0.02)) {
           cand.support = clamp(cand.support + rnd.float(-0.15, 0.35), 0, 85);
         }
       }

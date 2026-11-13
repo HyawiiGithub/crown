@@ -1536,6 +1536,12 @@ export interface CommodityMarket {
 export interface World {
   /** Country the player governs in singleplayer. */
   playerCountry?: Iso3;
+  /**
+   * The country each member holds in a shared world, keyed by user id. A
+   * command from that member targets their seat, never another player's.
+   * Singleplayer leaves this empty and uses playerCountry.
+   */
+  seats?: Record<string, Iso3>;
   /** Map feature key (ISO numeric or land key) -> polity that controls it. */
   control: Record<string, Iso3>;
   regions: MapRegion[];
