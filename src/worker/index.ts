@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import type { Capability, StaffRole, User } from "../shared/types";
 import { SCENARIOS, getScenario } from "../data/scenarios";
+import { HISTORY } from "../data/history";
 import { COUNTRIES } from "../data/countries";
 import { ALL_ISO3 } from "../data/countries";
 import { SECTORS } from "../data/economy";
@@ -404,6 +405,24 @@ const simStub = (c: { env: Env }, worldId: string) => c.env.SIM.get(c.env.SIM.id
 const DEFAULT_MAX_PLAYERS = 8;
 const MAX_MAX_PLAYERS = 32;
 
+/** Country codes a scenario starts with. Parsed once per scenario id. */
+const scenarioCountrySets = new Map<string, Set<string> | null>();
+function countriesOfScenario(scenarioId: string): Set<string> | null {
+  const cached = scenarioCountrySets.get(scenarioId);
+  if (cached !== undefined) return cached;
+  let set: Set<string> | null = null;
+  try {
+    const history = HISTORY[getScenario(scenarioId).year];
+    set = history ? new Set(history.polities.map((p) => p.id)) : null;
+  } catch {
+    // A custom scenario we cannot resolve: leave the code alone rather than
+    // refusing a world the developers authored.
+    set = null;
+  }
+  scenarioCountrySets.set(scenarioId, set);
+  return set;
+}
+
 // Lobbies are created by the developer: POST /api/worlds requires world.create.
 
 app.get("/api/worlds", async (c) => {
@@ -463,7 +482,7 @@ app.post("/api/worlds/:id/join", async (c) => {
   const id = c.req.param("id");
   const named = c.req.query("worldId");
   if (named && named !== id) return c.json({ error: "World mismatch" }, 400);
-  const row = await c.env.DB.prepare(`SELECT id, is_public, archived, max_players FROM worlds WHERE id = ?`).bind(id).first<{ id: string; is_public: number; archived: number; max_players: number }>();
+  const row = await c.env.DB.prepare(`SELECT id, scenario_id, is_public, archived, max_players FROM worlds WHERE id = ?`).bind(id).first<{ id: string; scenario_id: string; is_public: number; archived: number; max_players: number }>();
   if (!row || row.archived) return c.json({ error: "No such world" }, 404);
   const mine = await c.env.DB.prepare(`SELECT plays_country FROM world_members WHERE world_id = ? AND user_id = ?`).bind(id, u.id).first<{ plays_country: string | null }>();
   if (!row.is_public && !mine) return c.json({ error: "That world is closed" }, 403);
@@ -471,6 +490,8 @@ app.post("/api/worlds/:id/join", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { country?: string };
   const country = String(body.country ?? "").trim().toUpperCase();
   if (country && !/^[A-Z]{3}$/.test(country)) return c.json({ error: "Choose a country to play" }, 400);
+  const known = countriesOfScenario(String(row.scenario_id ?? id.split(":")[0]));
+  if (country && known && !known.has(country)) return c.json({ error: `${country} is not in that world` }, 400);
 
   try {
     if (mine) {

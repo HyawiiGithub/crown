@@ -347,6 +347,43 @@ async function main() {
   });
   check("a member with no seat in that country cannot vote", noSeat.body.ok === false && /no seat/.test(String(noSeat.body.message)), JSON.stringify(noSeat.body));
 
+  // --- a country-naming action is bound to the caller's seat ---
+  const foreignBill = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: players[1].cookie },
+    body: JSON.stringify({ type: "introduce-bill", country: "BEL", title: "Foreign Bill", summary: "Not mine.", body: "", category: "ordinary", sponsorId: "", sponsorPartyId: "" }),
+  });
+  check("an action naming another member's nation is refused", foreignBill.body.ok === false && /held by another member/.test(String(foreignBill.body.message)), JSON.stringify(foreignBill.body));
+  const ownBill = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: players[1].cookie },
+    body: JSON.stringify({ type: "introduce-bill", title: "Own Seat Bill", summary: "Mine.", body: "", category: "ordinary", sponsorId: "", sponsorPartyId: "" }),
+  });
+  check("an action with no country lands in the caller's seat", ownBill.body.ok === true, JSON.stringify(ownBill.body));
+  const seatBills = (await json(`/api/worlds/${PUBLIC_WORLD}/snapshot`)).body.world.bills;
+  const own = Object.values(seatBills).find((b) => b.title === "Own Seat Bill");
+  check("the bill was filed in the caller's country", own?.country === "ESP", String(own?.country));
+  const foreignCompany = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: players[1].cookie },
+    body: JSON.stringify({ type: "raise-referendum", country: "BEL", question: "Should this pass?" }),
+  });
+  check("another action naming that nation is refused too", foreignCompany.body.ok === false && /held by another member/.test(String(foreignCompany.body.message)), JSON.stringify(foreignCompany.body));
+
+  // --- a reserved code has to exist in the world's scenario ---
+  const badCode = await json(`/api/worlds/${WIDE_WORLD}/join`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: capped[1].cookie },
+    body: JSON.stringify({ country: "POL" }),
+  });
+  check("a real code that is absent from the scenario is refused", badCode.status === 400 && /not in that world/.test(String(badCode.body.error)), `status ${badCode.status} ${JSON.stringify(badCode.body)}`);
+  const badShape = await json(`/api/worlds/${WIDE_WORLD}/join`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: capped[1].cookie },
+    body: JSON.stringify({ country: "NOPE" }),
+  });
+  check("a code that is not a country at all is refused", badShape.status === 400, `status ${badShape.status} ${JSON.stringify(badShape.body)}`);
+
   // --- naming another world must not reach it ---
   const beforePrivate = (await json(`/api/worlds/${PRIVATE_WORLD}/snapshot`)).body.world;
   const crossRead = await json(`/api/worlds/${PUBLIC_WORLD}/snapshot?worldId=${encodeURIComponent(PRIVATE_WORLD)}`);

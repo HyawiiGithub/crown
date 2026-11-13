@@ -468,6 +468,23 @@ export class SimObject {
     return reserved;
   }
 
+  /**
+   * The country a country-naming action applies to.
+   *
+   * The seat is authoritative: an action naming another country is refused, and
+   * one naming none takes the seat. Naming a nation another member holds is
+   * refused with that hold named, so a reservation cannot be used by proxy.
+   */
+  private actAs(w: World, seat: string | null, asked: unknown): { country?: string; refusal?: string } {
+    const named = String(asked ?? "").trim().toUpperCase();
+    if (!named) {
+      return seat ? { country: seat } : { refusal: "Claim a country before acting for one" };
+    }
+    if (seat && named === seat) return { country: seat };
+    if (Object.values(w.seats ?? {}).includes(named)) return { refusal: `${named} is held by another member` };
+    return { refusal: seat ? `You can only act for the country you hold (${seat})` : "Claim a country before acting for one" };
+  }
+
   private async applyAction(body: { type: string; userId?: string; [k: string]: unknown }): Promise<{ ok: boolean; message: string; data?: unknown }> {
     await this.load(this.worldId());
     const w = this.world!;
@@ -536,7 +553,9 @@ export class SimObject {
           return { ok: true, message: `Vote recorded for ${voter.name}` };
         }
         case "introduce-bill": {
-          const c = w.countries[String(body.country ?? "")];
+          const target = this.actAs(w, seat, body.country);
+          if (target.refusal) return { ok: false, message: target.refusal };
+          const c = w.countries[target.country!];
           if (!c?.legislature) return { ok: false, message: "No legislature there" };
           const chamber = c.legislature.chambers[0];
           const bill = introduceBill(
@@ -581,7 +600,9 @@ export class SimObject {
           return { ok: out.ok, message: out.message };
         }
         case "raise-referendum": {
-          const c = w.countries[String(body.country ?? "")];
+          const target = this.actAs(w, seat, body.country);
+          if (target.refusal) return { ok: false, message: target.refusal };
+          const c = w.countries[target.country!];
           if (!c) return { ok: false, message: "No such country" };
           c.referendums.push({
             id: `ref-${c.id}-${Math.round(w.t)}`,
@@ -601,7 +622,9 @@ export class SimObject {
           return { ok: true, message: "Referendum called" };
         }
         case "found-company": {
-          const c = w.countries[String(body.country ?? "")];
+          const target = this.actAs(w, seat, body.country);
+          if (target.refusal) return { ok: false, message: target.refusal };
+          const c = w.countries[target.country!];
           if (!c) return { ok: false, message: "No such country" };
           const name = String(body.name ?? "New Venture");
           const id = `co-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Math.round(w.t)}`;
@@ -643,11 +666,13 @@ export class SimObject {
         case "create-politician": {
           const userId = String(body.userId ?? "");
           if (!userId) return { ok: false, message: "Sign in first" };
+          const target = this.actAs(w, seat, body.country);
+          if (target.refusal) return { ok: false, message: target.refusal };
           const out = createPolitician(w, {
             userId,
             username: String(body.username ?? "Citizen"),
             name: String(body.name ?? ""),
-            country: String(body.country ?? ""),
+            country: target.country!,
             partyId: body.partyId ? String(body.partyId) : undefined,
           }, this.rng!);
           return { ok: out.ok, message: out.message, data: out.character ? { characterId: out.character.id } : undefined };
@@ -664,9 +689,11 @@ export class SimObject {
           const office = String(body.office ?? "") as ElectionOffice;
           const allowed: ElectionOffice[] = ["chamber", "head-of-state", "head-of-government", "party-leader"];
           if (!allowed.includes(office)) return { ok: false, message: "Choose an office to contest" };
+          const target = this.actAs(w, seat, body.country);
+          if (target.refusal) return { ok: false, message: target.refusal };
           const out = runForOffice(w, {
             userId: String(body.userId ?? ""),
-            country: String(body.country ?? ""),
+            country: target.country!,
             office,
             chamberId: body.chamberId ? String(body.chamberId) : undefined,
             partyId: body.partyId ? String(body.partyId) : undefined,
@@ -679,14 +706,11 @@ export class SimObject {
           const out = campaign(w, String(body.userId ?? ""), String(body.electionId ?? ""), kind, this.rng!);
           return { ok: out.ok, message: out.message, data: out.delta === undefined ? undefined : { delta: out.delta } };
         }
-        case "appoint-minister":
-          return appointMinister(
-            w,
-            String(body.userId ?? ""),
-            String(body.country ?? ""),
-            String(body.area ?? "") as never,
-            String(body.characterId ?? ""),
-          );
+        case "appoint-minister": {
+          const target = this.actAs(w, seat, body.country);
+          if (target.refusal) return { ok: false, message: target.refusal };
+          return appointMinister(w, String(body.userId ?? ""), target.country!, String(body.area ?? "") as never, String(body.characterId ?? ""));
+        }
         case "chat-history":
           return { ok: true, message: "ok", data: this.chat };
         default: {
