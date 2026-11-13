@@ -913,7 +913,7 @@ function Military({ c, mine }: { c: Country; mine: boolean }) {
   const opsPick = useStore((s) => s.opsPick);
   const stored = useStore((s) => s.opsTarget);
   const landing = useStore((s) => s.opsLanding);
-  const opsTarget = stored && stored !== c.id ? stored : "";
+  const opsTarget = stored && stored !== c.id && countries[stored] && !countries[stored].annexedBy ? stored : "";
   const pick = opsTarget || (Object.values(countries).find((x) => x.id !== c.id && !x.annexedBy)?.id ?? "");
   const m = c.military;
   return (

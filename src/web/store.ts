@@ -138,6 +138,8 @@ interface Store {
   toast: (text: string, kind?: "ok" | "err") => void;
 }
 
+const CLEAR_OPS = { opsPick: null as string | null, opsTarget: null as string | null, opsLanding: "" };
+
 const worldInitial = {
   worldId: null as string | null,
   scenario: null as Store["scenario"],
@@ -204,13 +206,13 @@ export const useStore = create<Store>((set, get) => ({
     set({ saves: r.saves ?? [] });
   },
   startGame: async (scenarioId, country, name) => {
-    set({ ...worldInitial, connection: "connecting" });
+    set({ ...worldInitial, ...CLEAR_OPS, connection: "connecting" });
     const r = await call<{ ok: boolean; message?: string; world: World }>({ kind: "new-game", scenarioId, country, name });
     if (!r.ok) throw new Error(r.message ?? "Could not start the game");
     adoptWorld(r.world);
   },
   loadGame: async (saveId) => {
-    set({ ...worldInitial, connection: "connecting" });
+    set({ ...worldInitial, ...CLEAR_OPS, connection: "connecting" });
     const r = await call<{ ok: boolean; message?: string; world: World }>({ kind: "load", saveId });
     if (!r.ok) {
       set({ connection: "idle" });
@@ -220,7 +222,7 @@ export const useStore = create<Store>((set, get) => ({
   },
   leaveWorld: async () => {
     await call({ kind: "leave" });
-    set({ ...worldInitial });
+    set({ ...worldInitial, ...CLEAR_OPS });
     await get().refreshSaves();
   },
 }));
@@ -252,6 +254,10 @@ function adoptWorld(w: World): void {
     selected: w.playerCountry ?? null,
     params: w.params as unknown as Record<string, number>,
     directives: w.directives,
+    // A new world must not inherit an operation aimed at the last one.
+    opsPick: null,
+    opsTarget: null,
+    opsLanding: "",
   });
 }
 
