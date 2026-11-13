@@ -118,7 +118,7 @@ function stepMacro(world: World, c: Country, rnd: Rng, anchorRate: number, ancho
   const institutions = clamp01(1 - e.corruption);
   const base = m.baseBudget;
   const lever = (cur: number, ref: number, weight: number, cap: number) => clamp(weight * (cur / Math.max(1e-4, ref) - 1), -cap, cap);
-  const tfpFromPolicy = lever(budget.education, base.education, 0.006, 0.01) + lever(budget.science, base.science, 0.006, 0.012) + lever(budget.infrastructure, base.infrastructure, 0.005, 0.008) +
+  const tfpFromPolicy = lever(budget.education, base.education, 0.014, 0.02) + lever(budget.science, base.science, 0.014, 0.022) + lever(budget.infrastructure, base.infrastructure, 0.012, 0.016) +
     (c.tech?.industry ?? 0) * 0.004;
   // Conditional convergence: poor countries catch up only if institutions let them.
   const catchUp = clamp(-Math.log(relIncome) * 0.006 * institutions * institutions * 1.4, 0, 0.035);
@@ -726,7 +726,7 @@ function stepCompanies(world: World, rnd: Rng): void {
     co.tier = co.valuation > 1e12 ? "mega-cap" : co.valuation > 2e11 ? "large" : co.valuation > 2e10 ? "mid-cap" : "small";
     co.dailyVolume = Math.round((co.valuation / Math.max(0.01, co.sharePrice)) * 0.003);
 
-    if (net < 0 && co.debt > co.revenue * 2.8 && co.stateOwnership < 0.5 && rnd.chance(dt * 1.2)) {
+    if (net < -co.revenue * 0.02 && co.debt > co.revenue * 4.5 && co.stateOwnership < 0.5 && rnd.chance(dt * 0.25)) {
       const jobs = Math.round(co.employees);
       co.insolvent = true;
       co.listed = false;

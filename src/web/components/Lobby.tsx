@@ -49,6 +49,9 @@ export function Lobby() {
             <h1 style={{ fontSize: 34, letterSpacing: ".24em", textTransform: "uppercase" }}>CROWN</h1>
             <div className="dim" style={{ marginTop: 4 }}>Choose a year and a country. The world waits until you start the clock.</div>
           </div>
+          <span className="dim mono" style={{ fontSize: 12 }} title="Total time played across every world on this browser">
+            ⏱ {(() => { try { const t = Number(localStorage.getItem("crown.playtime.total") ?? 0) || 0; return `${Math.floor(t / 3600)}h ${Math.floor((t % 3600) / 60)}m`; } catch { return "0h 0m"; } })()}
+          </span>
           <span className="dim" style={{ fontSize: 12 }}>{s.user?.username}</span>
           <button className="btn btn--sm" onClick={() => fileRef.current?.click()}>Import save</button>
           <input ref={fileRef} type="file" accept=".json,application/json" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void importFile(f); e.target.value = ""; }} />

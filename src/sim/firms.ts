@@ -28,9 +28,9 @@ export const SUPPLY: Partial<Record<SectorId, { input: SectorId; ratio: number }
 };
 
 const PREFIX: Record<string, string[]> = {
-  early: ["Bessemer", "Whitworth", "Arkwright", "Lowell", "Hanseatic", "Lombard", "Corn Exchange"],
-  victorian: ["North Western", "Imperial", "Consolidated", "Midland", "Clyde", "Victoria", "Union"],
-  interwar: ["Vulcan", "Atlas", "Reichs", "Societe Generale", "United", "Meridian", "Continental"],
+  early: ["Bessemer", "Whitworth", "Arkwright", "Lowell", "Hanseatic", "Lombard", "Corn Exchange", "Tredegar", "Soho", "Cromford", "Ravensworth", "Boulton"],
+  victorian: ["North Western", "Imperial", "Consolidated", "Midland", "Clyde", "Victoria", "Union", "Lancashire", "Elswick", "Barrow", "Glasgow", "Tyneside", "Severn"],
+  interwar: ["Vulcan", "Atlas", "Reichs", "Societe Generale", "United", "Meridian", "Continental", "Krupp", "Skoda", "Fiat", "Renault", "Vickers", "Brown Boveri"],
   postwar: ["National", "Federated", "General", "Associated", "Central", "Continental"],
   modern: ["Atlas", "Meridian", "Crescent", "Northfield", "Vanguard", "Kestrel", "Pioneer", "Highland", "Riverton", "Bastion"],
 };
@@ -74,8 +74,18 @@ export function foundCompany(
   if (!c || !SECTORS[sector]) return null;
   const pool = PREFIX[eraOf(world.startDate.year)] ?? PREFIX.modern;
   const base = opts.name ?? `${pool[Math.floor(rnd.float(0, pool.length)) % pool.length]} ${SUFFIX[sector] ?? SECTORS[sector].label}`;
+  const taken = new Set(Object.values(world.companies).map((co) => co.name));
+  const TAIL = ["& Sons", "Brothers", "Holdings", "& Co", "Partners", "Trust", "Werke", "et Cie", "of London", "of Vienna", "Consolidated", "Union"];
   let name = base;
-  for (let n = 2; Object.values(world.companies).some((co) => co.name === name); n += 1) name = `${base} ${n}`;
+  if (taken.has(name)) {
+    const free = TAIL.find((t) => !taken.has(`${base} ${t}`));
+    if (free) name = `${base} ${free}`;
+    // If every tail is spoken for, draw a fresh name from the pool rather than numbering one.
+    else for (let tries = 0; tries < 24; tries += 1) {
+      const guess = `${pool[Math.floor(rnd.float(0, pool.length)) % pool.length]} ${SUFFIX[sector] ?? SECTORS[sector].label}`;
+      if (!taken.has(guess)) { name = guess; break; }
+    }
+  }
   const co = materialiseCompany(
     {
       name,

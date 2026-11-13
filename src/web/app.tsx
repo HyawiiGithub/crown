@@ -260,6 +260,22 @@ function WorldShell() {
     }
     s.set({ selected: id, rightTab: id === s.playerCountry ? "government" : "country" });
   };
+  // Total playtime: counted only while the tab is visible, kept per world.
+  useEffect(() => {
+    if (!s.worldId) return;
+    const tick = window.setInterval(() => {
+      if (document.hidden) return;
+      const st = useStore.getState();
+      const next = st.playSeconds + 10;
+      try {
+        localStorage.setItem(`crown.playtime.${st.worldId}`, String(next));
+        localStorage.setItem("crown.playtime.total", String((Number(localStorage.getItem("crown.playtime.total") ?? 0) || 0) + 10));
+      } catch { /* storage full or blocked */ }
+      st.set({ playSeconds: next });
+    }, 10000);
+    return () => window.clearInterval(tick);
+  }, [s.worldId]);
+
   // Escape backs out of a map target selection.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -318,6 +334,9 @@ function WorldShell() {
         <button className="btn btn--sm" onClick={() => void saveNow()}>Save</button>
         <button className="btn btn--sm" onClick={() => void exportSave()} title="Download this save as a file">Export</button>
         {can(s.user, "dev.console") && <button className="btn btn--sm" onClick={() => s.set({ devOpen: true })} title="Developer menu (F9)">Developer</button>}
+        <span className="dim mono" style={{ fontSize: 11 }} title="Time played in this world">
+          ⏱ {Math.floor(s.playSeconds / 3600)}h {Math.floor((s.playSeconds % 3600) / 60)}m
+        </span>
         <button className="btn btn--sm" onClick={() => void s.leaveWorld()}>Menu</button>
       </header>
 

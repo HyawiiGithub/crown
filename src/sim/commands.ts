@@ -5,9 +5,7 @@ import { stabilisationPlan } from "./step-economy";
 import { clamp, clamp01, type Rng } from "./rng";
 import { applyPolicy, introduceBill, needsLegislature } from "./step-politics";
 import { answerCrisis } from "./collapse";
-import { foundCompany } from "./firms";
 import { techOf } from "./tech";
-import { SECTORS } from "../data/economy";
 import { annex, createPuppetState, declareWar, imposeSanction, liftSanction, signTreaty, transferLand, vassalise } from "./step-world";
 import { aimSatisfaction, frontOccupation, peaceAccepted, peaceCost, peaceStanding, type PeaceTerms } from "./occupation";
 
@@ -164,16 +162,22 @@ export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Reco
       return { ok: true, message: `Research redirected to ${focus}.` };
     }
     case "sponsor-firm": {
-      const sector = String(body.sector ?? "") as SectorId;
-      if (!SECTORS[sector]) return { ok: false, message: "That is not an industry." };
+      const target = world.companies[String(body.company ?? "")];
+      if (!target) return { ok: false, message: "Pick an existing firm to fund — new ones come from the population." };
+      if (target.country !== c.id) return { ok: false, message: "That firm is not yours to fund." };
+      if (target.insolvent) return { ok: false, message: "That firm is already bankrupt." };
       const cost = Math.max(1e6, e.gdp * 0.02);
       if (e.reserves >= cost) e.reserves -= cost;
       else e.fiscal.debt += cost;
-      const co = foundCompany(world, c.id, sector, rng, { stateShare: 0.51, revenue: cost * 1.5 });
-      if (!co) return { ok: false, message: "The firm could not be registered." };
-      c.executive.approval = clamp(c.executive.approval - 2, 0, 100);
-      pushEvent(world, { kind: "economic", severity: "notice", country: c.id, title: `${c.name} sponsors ${co.name}`, body: `The treasury puts ${(cost / 1e9).toFixed(2)}B into a new ${SECTORS[sector].label.toLowerCase()} firm and takes 51%.`, tags: ["firms", "sponsorship"] });
-      return { ok: true, message: `${co.name} founded; the state holds 51%.` };
+      // Fresh capital goes to the balance sheet, not to a new competitor.
+      target.debt = Math.max(0, target.debt - cost * 0.7);
+      target.valuation = Math.max(1e5, target.valuation * 1.04);
+      target.sharePrice = Math.max(0.01, target.valuation / Math.max(1, target.shares ?? 1));
+      const bought = Math.min(0.02, cost / Math.max(1, target.valuation)) * 10;
+      target.stateOwnership = clamp(target.stateOwnership + bought, 0, 0.95);
+      c.executive.approval = clamp(c.executive.approval - 1, 0, 100);
+      pushEvent(world, { kind: "economic", severity: "notice", country: c.id, title: `${c.name} recapitalises ${target.name}`, body: `The treasury injects ${(cost / 1e9).toFixed(2)}B, taking its stake to ${(target.stateOwnership * 100).toFixed(0)}%.`, tags: ["firms", "sponsorship"] });
+      return { ok: true, message: `${target.name} funded; the state now holds ${(target.stateOwnership * 100).toFixed(0)}%.` };
     }
     case "crisis-response": {
       const said = answerCrisis(world, c, String(body.measure ?? ""));

@@ -127,6 +127,8 @@ interface Store {
   opsTarget: string | null;
   /** Landing site text for a naval invasion. */
   opsLanding: string;
+  /** Seconds actually played in this world. */
+  playSeconds: number;
 
   set: (p: Partial<Store>) => void;
   loadBootstrap: () => Promise<void>;
@@ -173,6 +175,7 @@ const worldInitial = {
   opsPick: null as string | null,
   opsTarget: null as string | null,
   opsLanding: "",
+  playSeconds: 0,
 };
 
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -256,6 +259,9 @@ function adoptWorld(w: World): void {
     opsPick: null,
     opsTarget: null,
     opsLanding: "",
+    playSeconds: (() => {
+      try { return Number(localStorage.getItem(`crown.playtime.${w.id}`) ?? 0) || 0; } catch { return 0; }
+    })(),
   });
 }
 

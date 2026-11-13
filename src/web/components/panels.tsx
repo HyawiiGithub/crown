@@ -538,7 +538,6 @@ function Firms({ c, mine }: { c: Country; mine: boolean }) {
   const companies = useStore((s) => s.companies);
   const rows = Object.values(companies).filter((x) => x.country === c.id).sort((a, b) => b.valuation - a.valuation);
   const [open, setOpen] = useState<string | null>(null);
-  const [sector, setSector] = useState<SectorId>("manufacturing");
   const selected = open ? companies[open] : undefined;
   const cost = Math.max(1e6, c.economy.gdp * 0.02);
   if (!rows.length && !mine) return <Empty>No major corporations are based here in this era.</Empty>;
@@ -546,17 +545,11 @@ function Firms({ c, mine }: { c: Country; mine: boolean }) {
     <div className="stack">
       {mine && (
         <div className="card" style={{ display: "grid", gap: 6 }}>
-          <strong style={{ fontSize: 12 }}>Sponsor a firm</strong>
-          <div className="dim" style={{ fontSize: 11 }}>The treasury pays ${credits(cost)} for 51%, so the state can direct output. Free-market opinion will not like it.</div>
+          <strong style={{ fontSize: 12 }}>State investment</strong>
+          <div className="dim" style={{ fontSize: 11 }}>The treasury pays ${credits(cost)} to recapitalise a firm you pick and takes a larger stake. New firms come from the population, not the budget.</div>
           <div className="row row--wrap" style={{ gap: 4 }}>
             <button className="btn btn--sm" onClick={() => void act({ type: "nationalise-all" })}>Nationalise all</button>
             <button className="btn btn--sm" onClick={() => void act({ type: "privatise-all" })}>Privatise all</button>
-          </div>
-          <div className="row" style={{ gap: 6 }}>
-            <select className="input grow" value={sector} onChange={(e) => setSector(e.target.value as SectorId)}>
-              {Object.entries(SECTORS).map(([id, x]) => <option key={id} value={id}>{x.label}</option>)}
-            </select>
-            <button className="btn btn--sm btn--primary" onClick={() => void act({ type: "sponsor-firm", sector })}>Sponsor</button>
           </div>
         </div>
       )}
@@ -607,6 +600,7 @@ function CompanyCard({ co, mine }: { co: Company; mine: boolean }) {
           {co.stateOwnership < 0.99 && <button className="btn btn--sm btn--danger" onClick={() => void act({ type: "nationalise", company: co.id })}>Nationalise</button>}
           {co.stateOwnership > 0.01 && <button className="btn btn--sm" onClick={() => void act({ type: "privatise", company: co.id })}>Privatise</button>}
           <button className="btn btn--sm" onClick={() => void act({ type: "bail-out", company: co.id })}>Bail out</button>
+          <button className="btn btn--sm" title="Inject 2% of GDP as fresh capital; the state takes a larger stake" onClick={() => void act({ type: "sponsor-firm", company: co.id })}>Fund</button>
         </div>
       )}
     </div>
