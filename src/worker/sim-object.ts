@@ -96,9 +96,11 @@ export class SimObject {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    // The caller names the world; `ctx.id` alone is a hash in this runtime.
-    const named = url.searchParams.get("worldId");
-    if (named) this.bootId = named;
+    // Bind the object to one world, once. A later request naming a different
+    // world is refused rather than served, so an object can never act as another.
+    const bound = await this.bindWorld(url);
+    if (!bound) return json({ error: "This object serves a different world" }, 409);
+    this.bootId = bound;
     const self = this.ctx;
 
     switch (url.pathname) {
@@ -147,6 +149,22 @@ export class SimObject {
    * `ctx.id.toString()` is only a hash of it and cannot identify a scenario.
    */
   private bootId: string | null = null;
+
+  /**
+   * The world this object serves.
+   *
+   * The first request to name a world stamps it into durable storage; from then
+   * on that stamp wins, so a caller cannot address one object while naming a
+   * different world. `ctx.id` alone is a hash in this runtime, so storage is the
+   * only authoritative record.
+   */
+  private async bindWorld(url: URL): Promise<string | null> {
+    const wanted = url.searchParams.get("worldId");
+    const stored = await this.ctx.storage.get<string>("worldId");
+    if (stored && wanted && stored !== wanted) return null;
+    if (!stored && wanted) await this.ctx.storage.put("worldId", wanted);
+    return stored ?? wanted ?? this.ctx.id.name ?? this.ctx.id.toString();
+  }
 
   private worldId(): string {
     return this.bootId ?? this.ctx.id.name ?? this.ctx.id.toString();

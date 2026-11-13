@@ -199,6 +199,43 @@ async function main() {
   check("patch carries country rows applyPatch can read", Boolean(sample && sample.economy && typeof sample.economy.gdp === "number"), sample ? `FRA gdp ${sample.economy.gdp}` : "none");
   check("patch carries the world clock", Boolean(patch && typeof patch.t === "number" && Array.isArray(patch.events)), patch ? `t=${patch.t}` : "none");
 
+  // --- roster guard: you must be in a world to act in it ---
+  const outsider = players[8]; // joined nothing
+  const outsiderAction = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: outsider.cookie },
+    body: JSON.stringify({ type: "claim-country", country: "ESP" }),
+  });
+  check("action from a player who joined no world is rejected", outsiderAction.status === 403, `status ${outsiderAction.status} ${JSON.stringify(outsiderAction.body)}`);
+
+  const privateAction = await json(`/api/worlds/${PRIVATE_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: players[1].cookie },
+    body: JSON.stringify({ type: "claim-country", country: "ITA" }),
+  });
+  check("action from a non-member on a private world is rejected", privateAction.status === 403, `status ${privateAction.status} ${JSON.stringify(privateAction.body)}`);
+
+  // --- a member still acts ---
+  const memberAction = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: owner.cookie },
+    body: JSON.stringify({ type: "claim-country", country: "BEL" }),
+  });
+  check("a member action still succeeds", memberAction.status === 200 && memberAction.body.ok === true, JSON.stringify(memberAction.body));
+
+  // --- naming another world must not reach it ---
+  const beforePrivate = (await json(`/api/worlds/${PRIVATE_WORLD}/snapshot`)).body.world;
+  const crossRead = await json(`/api/worlds/${PUBLIC_WORLD}/snapshot?worldId=${encodeURIComponent(PRIVATE_WORLD)}`);
+  check("a request naming another world is refused", crossRead.status === 400, `status ${crossRead.status} ${JSON.stringify(crossRead.body)}`);
+  const crossWrite = await json(`/api/worlds/${PUBLIC_WORLD}/action?worldId=${encodeURIComponent(PRIVATE_WORLD)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: owner.cookie },
+    body: JSON.stringify({ type: "claim-country", country: "PRT" }),
+  });
+  check("a write naming another world is refused", crossWrite.status === 400, `status ${crossWrite.status} ${JSON.stringify(crossWrite.body)}`);
+  const afterPrivate = (await json(`/api/worlds/${PRIVATE_WORLD}/snapshot`)).body.world;
+  check("the other world is not mutated by the attempt", beforePrivate.version === afterPrivate.version && beforePrivate.events.length === afterPrivate.events.length, `${beforePrivate.version}/${beforePrivate.events.length} -> ${afterPrivate.version}/${afterPrivate.events.length}`);
+  check("the named world was never loaded under the addressed one", Boolean(afterPrivate.countries && Object.keys(afterPrivate.countries).length > 50));
   ws.close();
 }
 

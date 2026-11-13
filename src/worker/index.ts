@@ -446,6 +446,8 @@ app.get("/api/worlds/:id", async (c) => {
 app.post("/api/worlds/:id/join", async (c) => {
   const u = me(c);
   const id = c.req.param("id");
+  const named = c.req.query("worldId");
+  if (named && named !== id) return c.json({ error: "World mismatch" }, 400);
   const row = await c.env.DB.prepare(`SELECT id, is_public, archived FROM worlds WHERE id = ?`).bind(id).first<{ id: string; is_public: number; archived: number }>();
   if (!row || row.archived) return c.json({ error: "No such world" }, 404);
   if (!row.is_public) {
@@ -515,6 +517,8 @@ function parseWorldRow(row: Record<string, unknown>) {
 
 app.get("/api/worlds/:id/snapshot", async (c) => {
   const id = c.req.param("id");
+  const named = c.req.query("worldId");
+  if (named && named !== id) return c.json({ error: "World mismatch" }, 400);
   const stub = simStub(c, id);
   const res = await stub.fetch(`https://do/snapshot?worldId=${encodeURIComponent(id)}`);
   return c.json(await res.json());
@@ -522,6 +526,8 @@ app.get("/api/worlds/:id/snapshot", async (c) => {
 
 app.get("/api/worlds/:id/patch", async (c) => {
   const id = c.req.param("id");
+  const named = c.req.query("worldId");
+  if (named && named !== id) return c.json({ error: "World mismatch" }, 400);
   const stub = simStub(c, id);
   const res = await stub.fetch(`https://do/patch?worldId=${encodeURIComponent(id)}`);
   return c.json(await res.json());
@@ -529,6 +535,8 @@ app.get("/api/worlds/:id/patch", async (c) => {
 
 app.get("/api/worlds/:id/stats", async (c) => {
   const id = c.req.param("id");
+  const named = c.req.query("worldId");
+  if (named && named !== id) return c.json({ error: "World mismatch" }, 400);
   const stub = simStub(c, id);
   return c.json(await stub.fetch(`https://do/stats?worldId=${encodeURIComponent(id)}`).then((r) => r.json()));
 });
@@ -549,6 +557,8 @@ app.get("/api/worlds/:id/socket-url", (c) => {
 
 app.get("/api/worlds/:id/ws", async (c) => {
   const id = c.req.param("id");
+  const named = c.req.query("worldId");
+  if (named && named !== id) return c.json({ error: "World mismatch" }, 400);
   const stub = simStub(c, id);
   const q = new URL(c.req.url).searchParams;
   q.set("worldId", id);
@@ -562,6 +572,8 @@ app.get("/api/worlds/:id/ws", async (c) => {
 app.post("/api/worlds/:id/action", async (c) => {
   const u = me(c);
   const id = c.req.param("id");
+  const named = c.req.query("worldId");
+  if (named && named !== id) return c.json({ error: "World mismatch" }, 400);
   const body = (await c.req.json()) as Record<string, unknown>;
   const type = String(body.type ?? "");
 
@@ -583,6 +595,11 @@ app.post("/api/worlds/:id/action", async (c) => {
   };
   const cap = NEEDED[type];
   if (cap) requireCapability(u, cap);
+
+  const member = await c.env.DB.prepare(`SELECT 1 AS ok FROM world_members WHERE world_id = ? AND user_id = ?`)
+    .bind(id, u.id)
+    .first();
+  if (!member) return c.json({ ok: false, error: "Join this world before acting in it", message: "Join this world before acting in it" }, 403);
 
   const stub = simStub(c, id);
   const res = await stub.fetch(`https://do/action?worldId=${encodeURIComponent(id)}`, {
