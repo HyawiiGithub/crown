@@ -370,6 +370,36 @@ async function main() {
   });
   check("another action naming that nation is refused too", foreignCompany.body.ok === false && /held by another member/.test(String(foreignCompany.body.message)), JSON.stringify(foreignCompany.body));
 
+  // --- every country-naming action takes its country from the seat ---
+  const seatWorld = (await json(`/api/worlds/${PUBLIC_WORLD}/snapshot`)).body.world;
+  const freeNation = Object.keys(seatWorld.countries).find((iso) => iso !== "BEL" && iso !== "ESP" && iso !== "FRA" && !Object.values(seatWorld.seats ?? {}).includes(iso) && !seatWorld.countries[iso].annexedBy);
+  for (const [type, payload] of [
+    ["run-for-office", { office: "chamber" }],
+    ["create-politician", { name: "Seat Candidate" }],
+    ["appoint-minister", { area: "finance", characterId: "nobody" }],
+  ]) {
+    const foreign = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: players[1].cookie },
+      body: JSON.stringify({ type, country: "BEL", ...payload }),
+    });
+    check(`${type} refuses a nation another member holds`, foreign.body.ok === false && /held by another member/.test(String(foreign.body.message)), JSON.stringify(foreign.body));
+    const unheld = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: players[1].cookie },
+      body: JSON.stringify({ type, country: freeNation, ...payload }),
+    });
+    check(`${type} refuses a nation nobody holds`, unheld.body.ok === false && /country you hold/.test(String(unheld.body.message)), JSON.stringify(unheld.body));
+  }
+  const derivedOffice = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: players[1].cookie },
+    body: JSON.stringify({ type: "run-for-office", office: "chamber" }),
+  });
+  check("a country-naming action with no country falls back to the seat", !/country you hold|held by another member|Claim a country/.test(String(derivedOffice.body.message ?? "")), JSON.stringify(derivedOffice.body));
+  const afterNaming = (await json(`/api/worlds/${PUBLIC_WORLD}/snapshot`)).body.world;
+  check("the refused foreign bill filed nothing in that nation", !Object.values(afterNaming.bills).some((b) => b.title === "Foreign Bill"), Object.values(afterNaming.bills).map((b) => `${b.title}@${b.country}`).join(","));
+
   // --- a reserved code has to exist in the world's scenario ---
   const badCode = await json(`/api/worlds/${WIDE_WORLD}/join`, {
     method: "POST",
