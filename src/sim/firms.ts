@@ -13,6 +13,17 @@ import { clamp01, type Rng } from "./rng";
 
 const NAMES = ["Atlas", "Meridian", "Crescent", "Northfield", "Vanguard", "Kestrel", "Pioneer", "Sunrise", "Highland", "Riverton", "Bastion", "Larkfield", "Ostrava", "Cobalt", "Ellsworth"];
 
+/** Companies grouped by home country, so a weekly pass is O(firms), not O(firms x countries). */
+export function indexCompanies(world: World): Map<string, Company[]> {
+  const out = new Map<string, Company[]>();
+  for (const co of Object.values(world.companies)) {
+    const list = out.get(co.country);
+    if (list) list.push(co);
+    else out.set(co.country, [co]);
+  }
+  return out;
+}
+
 /** Create one company in a country, optionally state-owned. */
 export function foundCompany(
   world: World,
@@ -49,9 +60,10 @@ export function foundCompany(
 /** Small companies the population starts on its own, where conditions allow. */
 export function stepFoundings(world: World, rnd: Rng): void {
   const rate = clamp01(world.params.firmFormation ?? 0.03);
+  const byCountry = indexCompanies(world);
   for (const c of Object.values(world.countries)) {
     if (c.annexedBy || c.overlord) continue;
-    const count = Object.values(world.companies).filter((co) => co.country === c.id).length;
+    const count = byCountry.get(c.id)?.length ?? 0;
     if (count >= 30) continue;
     const unemployment = c.economy.labour.unemployment;
     // New firms appear where there is growth and spare labour, not in a slump.

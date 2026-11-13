@@ -1,5 +1,6 @@
 import type { Company, Country, MarketMood, SectorId, SectorState, World } from "../shared/types";
 import { SECTORS } from "../data/economy";
+import { indexCompanies } from "./firms";
 import { incomeShares, pushEvent, recomputeGlobals, taxCollected } from "./bootstrap";
 
 import { Rng, approach, clamp, clamp01 } from "./rng";
@@ -64,10 +65,25 @@ export function stepEconomy(world: World, rnd: Rng): void {
   const anchorInflation = us?.economy.monetary.inflation ?? 0.02;
   const union = world.countries.DEU?.economy.monetary.policyRate ?? 0.02;
 
+  // Build the company index once: firms founded in play feed their sector output.
+  const byCountry = indexCompanies(world);
+  const valueAdded: Record<string, number> = {};
+  const sectorOutput: Record<string, Map<SectorId, number>> = {};
+  for (const [id, list] of byCountry) {
+    let va = 0;
+    const bySector = new Map<SectorId, number>();
+    for (const co of list) {
+      if (co.insolvent || co.founded < 0) continue;
+      va += co.revenue * 0.35;
+      bySector.set(co.sector, (bySector.get(co.sector) ?? 0) + co.revenue);
+    }
+    valueAdded[id] = va;
+    sectorOutput[id] = bySector;
+  }
   for (const c of Object.values(world.countries)) {
     if (c.annexedBy) continue;
-    stepMacro(world, c, rnd, anchorRate, anchorInflation, union);
-    stepSectors(world, c);
+    stepMacro(world, c, rnd, anchorRate, anchorInflation, union, valueAdded[c.id] ?? 0);
+    stepSectors(world, c, sectorOutput[c.id]);
     stepHouseholds(c);
   }
   stepCompanies(world, rnd);
@@ -80,7 +96,7 @@ export function stepEconomy(world: World, rnd: Rng): void {
 // Macro
 // ===========================================================================
 
-function stepMacro(world: World, c: Country, rnd: Rng, anchorRate: number, anchorInflation: number, unionRate: number): void {
+function stepMacro(world: World, c: Country, rnd: Rng, anchorRate: number, anchorInflation: number, unionRate: number, firmValueAdded = 0): void {
   const e = c.economy;
   const m = e.macro;
   const f = e.fiscal;
@@ -222,7 +238,7 @@ function stepMacro(world: World, c: Country, rnd: Rng, anchorRate: number, ancho
   // ---- 5. Output, labour, wages -------------------------------------------
   // All reported money is in US dollars at market exchange rates.
   const nominal = Math.max(1, (m.realGdp * m.priceLevel) / e.monetary.exchangeRateVsUsd);
-  e.gdp = nominal;
+  e.gdp = nominal + firmValueAdded;
   e.gdpPerCapita = nominal / Math.max(1, e.population);
   e.productivity = clamp(e.productivity + m.tfpGrowth * 30 * dt, 1, 100);
 
@@ -484,7 +500,7 @@ function bankingCrisis(world: World, c: Country): void {
 // Sector markets
 // ===========================================================================
 
-function stepSectors(world: World, c: Country): void {
+function stepSectors(world: World, c: Country, firmOutput?: Map<import("../shared/types").SectorId, number>): void {
   const e = c.economy;
   const m = e.macro;
   const dt = WEEK_YEARS;
@@ -528,7 +544,7 @@ function stepSectors(world: World, c: Country): void {
     s.growth = approach(s.growth, clamp(growthRate, -0.6, 0.6), 0.08);
     s.quantity = Math.max(1, q);
     s.output = s.quantity * s.price * m.priceLevel;
-    totalOutput += s.output;
+    totalOutput += s.output + (firmOutput?.get(s.id) ?? 0);
 
     // Margins: market power and scarcity, less regulation, wages and tax.
     const marginTarget = clamp(prof.margin * (0.7 + s.concentration * 0.7) + excess * 0.15 - (s.regulation - 0.3) * 0.05 - Math.max(0, m.minimumWage - 0.5) * prof.labourIntensity * 0.04 + s.stateSubsidy * 0.3, -0.25, 0.65);
@@ -540,7 +556,7 @@ function stepSectors(world: World, c: Country): void {
   const employed = e.population * e.labour.participation * (1 - e.labour.unemployment);
   let jobWeight = 0;
   for (const s of e.sectors) {
-    s.share = s.output / Math.max(1, totalOutput);
+    s.share = (s.output + (firmOutput?.get(s.id) ?? 0)) / Math.max(1, totalOutput);
     jobWeight += s.share * SECTORS[s.id].labourIntensity * (s.id === "agriculture" ? 2 : 1);
   }
   for (const s of e.sectors) {

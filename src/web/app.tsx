@@ -29,16 +29,22 @@ const LAYERS: { id: MapLayer; label: string }[] = [
 ];
 
 /** Shown on sign-in and the scenario screen, not during a game. */
-function MultiplayerWarning() {
+function ConnectionDot() {
+  const state = useStore((s) => s.connection);
   const inGame = useStore((s) => Boolean(s.worldId));
-  if (inGame) return null;
-  return <div className="mp-warning" role="alert">Warning: Multiplayer Disabled</div>;
+  if (!inGame) return null;
+  const colour = state === "live" ? "var(--positive)" : state === "error" ? "var(--negative)" : "#d08b2c";
+  const label = state === "live" ? "Connected" : state === "error" ? "Desync" : "Syncing";
+  return (
+    <div className="row" style={{ gap: 6, fontSize: 11 }} title={label}>
+      <span style={{ width: 8, height: 8, borderRadius: 4, background: colour, display: "inline-block" }} />
+      <span className="dim">{label}</span>
+    </div>
+  );
 }
-
 export function App() {
   return (
     <div className="root-column">
-      <MultiplayerWarning />
       <div className="root-screen">
         <Screen />
       </div>
@@ -270,9 +276,10 @@ function WorldShell() {
       <header className="masthead">
         <span className="masthead__title">{scenario?.theme.masthead ?? "CROWN"}</span>
         <span className="masthead__date mono">{scenario ? simDate(scenario.startDate, s.simTime) : ""}</span>
+        <ConnectionDot />
         <span className="row time-controls" role="group" aria-label="Game speed">
           <button className={`btn btn--sm ${s.paused ? "btn--active" : ""}`} onClick={() => setClock({ paused: !s.paused })} title="Pause or resume (Space)">{s.paused ? "Play" : "Pause"}</button>
-          {SPEEDS.map((x) => <button key={x.value} className={`btn btn--sm ${!s.paused && s.speed === x.value ? "btn--active" : ""}`} title={x.title} onClick={() => setClock({ speed: x.value, paused: false })}>{x.label}x</button>)}
+          {(s.connection === "live" ? SPEEDS.filter((x) => x.value <= 1) : SPEEDS).map((x) => <button key={x.value} className={`btn btn--sm ${!s.paused && s.speed === x.value ? "btn--active" : ""}`} title={x.title} onClick={() => setClock({ speed: x.value, paused: false })}>{x.label}x</button>)}
         </span>
         {globals && (
           <span className="row masthead__stats">

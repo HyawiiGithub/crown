@@ -400,10 +400,7 @@ app.get("/api/portrait", async (c) => {
 
 const simStub = (c: { env: Env }, worldId: string) => c.env.SIM.get(c.env.SIM.idFromName(worldId));
 
-// Multiplayer is disabled for now: the game runs entirely in the browser. These
-// routes stay in the code base but refuse work, so no Durable Object spins up.
-app.all("/api/worlds", (c) => (c.req.method === "GET" ? c.json({ worlds: [], multiplayerDisabled: true }) : c.json({ error: "Multiplayer is disabled" }, 503)));
-app.all("/api/worlds/*", (c) => c.json({ error: "Multiplayer is disabled" }, 503));
+// Lobbies are created by the developer: POST /api/worlds requires world.create.
 
 app.get("/api/worlds", async (c) => {
   const u = c.get("user");
