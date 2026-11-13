@@ -129,6 +129,26 @@ async function main(): Promise<void> {
   const after = await (await object.fetch(new Request("https://do/snapshot?worldId=1900%3Aguard"))).json();
   const afterWorld = after.world ?? after;
   check("a seatless member filed no bill, company, politician or referendum", !Object.values(afterWorld.bills).some((b: any) => b.title === "Seatless Bill") && !Object.values(afterWorld.companies).some((c: any) => c.name === "Seatless Holdings") && !Object.values(afterWorld.characters).some((c: any) => c.userId === "u3"), `${Object.keys(afterWorld.bills).length} bills, ${Object.keys(afterWorld.companies).length} companies`);
+
+  // --- a bill's sponsor and party belong to the seat's country ---
+  const foreignChar: any = Object.values(afterWorld.characters).find((ch: any) => ch.country === "ESP");
+  const ownChar: any = Object.values(afterWorld.characters).find((ch: any) => ch.userId === "u1");
+  const foreignParty: any = (afterWorld.countries.ESP.parties ?? [])[0];
+  check("the world has a foreign character and party to name", Boolean(foreignChar && ownChar && foreignParty), `${foreignChar?.id} ${ownChar?.id} ${foreignParty?.id}`);
+  const bill = (extra: Record<string, unknown>) => act({ type: "introduce-bill", userId: "u1", title: "Sponsor Bill", summary: "", body: "", category: "ordinary", ...extra });
+  const foreignSponsor = await (await bill({ sponsorId: foreignChar?.id })).json();
+  check("introduce-bill refuses a sponsor from another country", foreignSponsor.ok === false && /not a politician in France/.test(String(foreignSponsor.message)), String(foreignSponsor.message));
+  const foreignPartyRes = await (await bill({ sponsorPartyId: foreignParty?.id })).json();
+  check("introduce-bill refuses a party from another country", foreignPartyRes.ok === false && /not registered in France/.test(String(foreignPartyRes.message)), String(foreignPartyRes.message));
+  const ownSponsor = await (await bill({ sponsorId: ownChar?.id })).json();
+  check("introduce-bill accepts the caller's own character as sponsor", ownSponsor.ok === true, String(ownSponsor.message));
+  const sponsored = await (await object.fetch(new Request("https://do/snapshot?worldId=1900%3Aguard"))).json();
+  const sponsoredWorld = sponsored.world ?? sponsored;
+  const sponsorBill: any = Object.values(sponsoredWorld.bills).find((b: any) => b.title === "Sponsor Bill");
+  check("the bill carries the sponsor it was given", sponsorBill?.sponsorId === ownChar?.id, `${sponsorBill?.sponsorId} vs ${ownChar?.id}`);
+  const fraParty: any = (afterWorld.countries.FRA.parties ?? [])[0];
+  const foreignPolitician = await (await act({ type: "create-politician", userId: "u2", name: "Party Tester", partyId: fraParty?.id })).json();
+  check("create-politician refuses a party from another country", foreignPolitician.ok === false && /not registered in Spain/.test(String(foreignPolitician.message)), String(foreignPolitician.message));
 }
 
 main()

@@ -429,6 +429,44 @@ async function main() {
     body: JSON.stringify({ type: "run-for-office", office: "chamber" }),
   });
   check("a country-naming action with no country falls back to the seat", !/country you hold|held by another member|Claim a country/.test(String(derivedOffice.body.message ?? "")), JSON.stringify(derivedOffice.body));
+
+  // --- a bill's sponsor and party belong to the member's country ---
+  const belParty = (seatWorld.countries.BEL.parties ?? [])[0];
+  const espParty = (seatWorld.countries.ESP.parties ?? [])[0];
+  check("both countries have a party to name", Boolean(belParty && espParty), `${belParty?.id} ${espParty?.id}`);
+  const foreignSponsor = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: players[1].cookie },
+    body: JSON.stringify({ type: "introduce-bill", title: "Foreign Sponsor Bill", summary: "", body: "", category: "ordinary", sponsorId: characterId }),
+  });
+  check("introduce-bill refuses a sponsor from another member country", foreignSponsor.body.ok === false && /not a politician in Spain/.test(String(foreignSponsor.body.message)), JSON.stringify(foreignSponsor.body));
+  const foreignParty = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: players[1].cookie },
+    body: JSON.stringify({ type: "introduce-bill", title: "Foreign Party Bill", summary: "", body: "", category: "ordinary", sponsorPartyId: belParty?.id }),
+  });
+  check("introduce-bill refuses another member party", foreignParty.body.ok === false && /not registered in Spain/.test(String(foreignParty.body.message)), JSON.stringify(foreignParty.body));
+  const foreignPartyMember = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: players[1].cookie },
+    body: JSON.stringify({ type: "create-politician", name: "Party Tester", partyId: belParty?.id }),
+  });
+  check("create-politician refuses another member party", foreignPartyMember.body.ok === false && /not registered in Spain/.test(String(foreignPartyMember.body.message)), JSON.stringify(foreignPartyMember.body));
+  const ownPartyMember = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: players[1].cookie },
+    body: JSON.stringify({ type: "create-politician", name: "Party Member Tester", partyId: espParty?.id }),
+  });
+  const ownMemberId = ownPartyMember.body.data?.characterId;
+  check("create-politician accepts the member own party", ownPartyMember.body.ok === true && typeof ownMemberId === "string", JSON.stringify(ownPartyMember.body));
+  const sponsored = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: players[1].cookie },
+    body: JSON.stringify({ type: "introduce-bill", title: "Seat Sponsor Bill", summary: "", body: "", category: "ordinary", sponsorId: ownMemberId }),
+  });
+  check("introduce-bill accepts the member own character", sponsored.body.ok === true, JSON.stringify(sponsored.body));
+  const sponsorBill = Object.values((await json(`/api/worlds/${PUBLIC_WORLD}/snapshot`)).body.world.bills).find((b) => b.title === "Seat Sponsor Bill");
+  check("the bill carries the sponsor and the party that sponsor sits in", sponsorBill?.sponsorId === ownMemberId && sponsorBill?.sponsorPartyId === espParty?.id, `${sponsorBill?.sponsorId} / ${sponsorBill?.sponsorPartyId}`);
   const afterNaming = (await json(`/api/worlds/${PUBLIC_WORLD}/snapshot`)).body.world;
   check("the refused foreign bill filed nothing in that nation", !Object.values(afterNaming.bills).some((b) => b.title === "Foreign Bill"), Object.values(afterNaming.bills).map((b) => `${b.title}@${b.country}`).join(","));
 

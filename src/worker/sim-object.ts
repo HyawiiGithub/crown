@@ -573,6 +573,22 @@ export class SimObject {
           const c = w.countries[target.country!];
           if (!c?.legislature) return { ok: false, message: "No legislature there" };
           const chamber = c.legislature.chambers[0];
+          // The sponsor and their party are politicians of the country the bill
+          // sits in: a member files under their own character, or a name from this
+          // country, never a foreign one.
+          const askedSponsor = String(body.sponsorId ?? "").trim();
+          const sponsor = askedSponsor ? w.characters[askedSponsor] : characterForUserInCountry(w, actor, c.id);
+          if (askedSponsor && (!sponsor || sponsor.country !== c.id)) {
+            return { ok: false, message: `That sponsor is not a politician in ${c.name}` };
+          }
+          const askedParty = String(body.sponsorPartyId ?? "").trim();
+          if (askedParty && !c.parties.some((p) => p.id === askedParty)) {
+            return { ok: false, message: `That party is not registered in ${c.name}` };
+          }
+          if (askedParty && sponsor?.partyId && askedParty !== sponsor.partyId) {
+            return { ok: false, message: `${sponsor.name} does not sit in that party` };
+          }
+          const sponsorPartyId = sponsor?.partyId ?? askedParty;
           const bill = introduceBill(
             w,
             c.id,
@@ -581,8 +597,8 @@ export class SimObject {
               summary: String(body.summary ?? ""),
               body: String(body.body ?? ""),
               category: (body.category as "money" | "ordinary" | "constitutional" | "emergency") ?? "ordinary",
-              sponsorId: String(body.sponsorId ?? ""),
-              sponsorPartyId: String(body.sponsorPartyId ?? ""),
+              sponsorId: sponsor?.id ?? "",
+              sponsorPartyId,
               chamberId: chamber.id,
               passageChambers: c.legislature.chambers.map((x) => x.id),
               effects: (body.effects as never) ?? {},
@@ -683,12 +699,19 @@ export class SimObject {
           if (!userId) return { ok: false, message: "Sign in first" };
           const target = this.actAs(w, seat, body.country);
           if (target.refusal) return { ok: false, message: target.refusal };
+          const home = w.countries[target.country!];
+          if (!home) return { ok: false, message: "No such country" };
+          const askedParty = body.partyId ? String(body.partyId).trim() : "";
+          const party = askedParty ? home.parties.find((p) => p.id === askedParty) : undefined;
+          if (askedParty && !party) {
+            return { ok: false, message: `That party is not registered in ${home.name}` };
+          }
           const out = createPolitician(w, {
             userId,
             username: String(body.username ?? "Citizen"),
             name: String(body.name ?? ""),
-            country: target.country!,
-            partyId: body.partyId ? String(body.partyId) : undefined,
+            country: home.id,
+            partyId: party?.id,
           }, this.rng!);
           return { ok: out.ok, message: out.message, data: out.character ? { characterId: out.character.id } : undefined };
         }
