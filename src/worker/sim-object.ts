@@ -96,6 +96,9 @@ export class SimObject {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    // The caller names the world; `ctx.id` alone is a hash in this runtime.
+    const named = url.searchParams.get("worldId");
+    if (named) this.bootId = named;
     const self = this.ctx;
 
     switch (url.pathname) {
@@ -139,6 +142,15 @@ export class SimObject {
   // Boot
   // =========================================================================
 
+  /**
+   * The world id is the name this object was addressed by (`idFromName`).
+   * `ctx.id.toString()` is only a hash of it and cannot identify a scenario.
+   */
+  private bootId: string | null = null;
+
+  private worldId(): string {
+    return this.bootId ?? this.ctx.id.name ?? this.ctx.id.toString();
+  }
   private async load(id: string): Promise<void> {
     if (this.world) return;
 
@@ -183,7 +195,7 @@ export class SimObject {
   }
 
   private async init(url: URL): Promise<InitResult> {
-    const id = url.searchParams.get("worldId") ?? this.ctx.id.toString();
+    const id = url.searchParams.get("worldId") ?? this.worldId();
     const name = url.searchParams.get("name");
     await this.load(id);
     const w = this.world!;
@@ -263,12 +275,12 @@ export class SimObject {
   }
 
   private async patch(): Promise<PatchPayload> {
-    await this.load(this.ctx.id.toString());
+    await this.load(this.worldId());
     return this.buildPatch();
   }
 
   private async snapshot(): Promise<{ world: World; users: OnlineUser[]; chat: ChatMessage[] }> {
-    await this.load(this.ctx.id.toString());
+    await this.load(this.worldId());
     return { world: this.world!, users: this.onlineUsers(), chat: this.chat };
   }
 
@@ -291,14 +303,8 @@ export class SimObject {
     this.ctx.acceptWebSocket(server);
     this.subs.set(server, { socket: server, userId, username, avatar, staffRole, country, lastSeen: Date.now() });
 
-    server.addEventListener("message", (ev) => void this.onMessage(server, String(ev.data)));
-    server.addEventListener("close", () => {
-      this.subs.delete(server);
-      this.broadcast(JSON.stringify({ type: "presence", users: this.onlineUsers() }));
-    });
-    server.addEventListener("error", () => this.subs.delete(server));
 
-    void this.load(this.ctx.id.toString()).then(() => {
+    void this.load(this.worldId()).then(() => {
       try {
         server.send(JSON.stringify({ type: "snapshot", world: this.world, users: this.onlineUsers() }));
         this.broadcast(JSON.stringify({ type: "presence", users: this.onlineUsers() }));
@@ -309,6 +315,22 @@ export class SimObject {
 
     void client;
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  /** Hibernation-API entry point for a frame from a subscriber. */
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    const raw = typeof message === "string" ? message : new TextDecoder().decode(message);
+    await this.onMessage(ws, raw);
+  }
+
+  /** Hibernation-API entry point for a dropped subscriber. */
+  async webSocketClose(ws: WebSocket): Promise<void> {
+    this.subs.delete(ws);
+    this.broadcast(JSON.stringify({ type: "presence", users: this.onlineUsers() }));
+  }
+
+  async webSocketError(ws: WebSocket): Promise<void> {
+    this.subs.delete(ws);
   }
 
   private async onMessage(ws: WebSocket, raw: string): Promise<void> {
@@ -383,7 +405,7 @@ export class SimObject {
 
   private async action(request: Request): Promise<{ ok: boolean; message: string; data?: unknown }> {
     const body = (await request.json()) as { type: string; userId?: string; [k: string]: unknown };
-    await this.load(this.ctx.id.toString());
+    await this.load(this.worldId());
     const w = this.world!;
 
     try {
@@ -571,7 +593,7 @@ export class SimObject {
 
   private async dev(request: Request): Promise<{ ok: boolean; message: string; data?: unknown }> {
     const body = (await request.json()) as { op: string; actor?: { id: string; username: string }; [k: string]: unknown };
-    await this.load(this.ctx.id.toString());
+    await this.load(this.worldId());
     const w = this.world!;
     const actor = body.actor ?? { id: "system", username: "system" };
 

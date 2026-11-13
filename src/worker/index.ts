@@ -439,7 +439,7 @@ app.get("/api/worlds/:id", async (c) => {
   const row = await c.env.DB.prepare(`SELECT * FROM worlds WHERE id = ?`).bind(id).first<Record<string, unknown>>();
   if (!row) return c.json({ error: "No such world" }, 404);
   const stub = simStub(c, id);
-  const stats = await stub.fetch("https://do/stats").then((r) => r.json());
+  const stats = await stub.fetch(`https://do/stats?worldId=${encodeURIComponent(id)}`).then((r) => r.json());
   return c.json({ world: parseWorldRow(row), stats });
 });
 
@@ -516,21 +516,21 @@ function parseWorldRow(row: Record<string, unknown>) {
 app.get("/api/worlds/:id/snapshot", async (c) => {
   const id = c.req.param("id");
   const stub = simStub(c, id);
-  const res = await stub.fetch("https://do/snapshot");
+  const res = await stub.fetch(`https://do/snapshot?worldId=${encodeURIComponent(id)}`);
   return c.json(await res.json());
 });
 
 app.get("/api/worlds/:id/patch", async (c) => {
   const id = c.req.param("id");
   const stub = simStub(c, id);
-  const res = await stub.fetch("https://do/patch");
+  const res = await stub.fetch(`https://do/patch?worldId=${encodeURIComponent(id)}`);
   return c.json(await res.json());
 });
 
 app.get("/api/worlds/:id/stats", async (c) => {
   const id = c.req.param("id");
   const stub = simStub(c, id);
-  return c.json(await stub.fetch("https://do/stats").then((r) => r.json()));
+  return c.json(await stub.fetch(`https://do/stats?worldId=${encodeURIComponent(id)}`).then((r) => r.json()));
 });
 
 /** WebSocket upgrade URL for the client. */
@@ -550,7 +550,9 @@ app.get("/api/worlds/:id/socket-url", (c) => {
 app.get("/api/worlds/:id/ws", async (c) => {
   const id = c.req.param("id");
   const stub = simStub(c, id);
-  return stub.fetch(new Request(`https://do/join?${new URL(c.req.url).searchParams}`, { headers: c.req.raw.headers }));
+  const q = new URL(c.req.url).searchParams;
+  q.set("worldId", id);
+  return stub.fetch(new Request(`https://do/join?${q}`, { headers: c.req.raw.headers }));
 });
 
 // ===========================================================================
@@ -583,7 +585,7 @@ app.post("/api/worlds/:id/action", async (c) => {
   if (cap) requireCapability(u, cap);
 
   const stub = simStub(c, id);
-  const res = await stub.fetch("https://do/action", {
+  const res = await stub.fetch(`https://do/action?worldId=${encodeURIComponent(id)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ ...body, userId: u.id, username: u.username }),
@@ -647,7 +649,7 @@ app.post("/api/worlds/:id/dev", async (c) => {
   if (cap) requireCapability(u, cap);
 
   const stub = simStub(c, id);
-  const res = await stub.fetch("https://do/dev", {
+  const res = await stub.fetch(`https://do/dev?worldId=${encodeURIComponent(id)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ ...body, actor: { id: u.id, username: u.username } }),
