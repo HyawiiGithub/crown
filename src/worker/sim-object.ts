@@ -30,8 +30,10 @@ import {
   runForOffice,
   type CampaignKind,
 } from "../sim/politics-players";
+import type { Capability, StaffRole } from "../shared/types";
 import { runDevOp } from "../sim/dev-ops";
 import { runCommand } from "../sim/commands";
+import { ACTION_CAPABILITIES, capabilitiesFor } from "./capabilities";
 import { pushEvent, recomputeGlobals } from "../sim/bootstrap";
 import { Rng, clamp } from "../sim/rng";
 
@@ -433,18 +435,27 @@ export class SimObject {
     // it again because it is the thing that owns the world: a caller that
     // reaches it another way still cannot act in a world it never joined, and a
     // failed check refuses rather than allows.
-    let member: { ok: number } | null;
+    let member: { staff_role: string; capabilities_json: string | null } | null;
     try {
-      member = await this.env.DB.prepare(`SELECT 1 AS ok FROM world_members WHERE world_id = ? AND user_id = ?`)
+      member = await this.env.DB.prepare(
+        `SELECT u.staff_role, u.capabilities_json FROM world_members m JOIN users u ON u.id = m.user_id WHERE m.world_id = ? AND m.user_id = ?`,
+      )
         .bind(worldId, userId)
-        .first<{ ok: number }>();
+        .first<{ staff_role: string; capabilities_json: string | null }>();
     } catch (err) {
       console.error("roster check failed", err);
       return json({ ok: false, message: "The world is unavailable" }, 503);
     }
     if (!member) return json({ ok: false, message: "Join this world before acting in it" }, 403);
 
-    return json(await this.applyAction(body));
+    let extra: Capability[] = [];
+    try {
+      extra = JSON.parse(String(member.capabilities_json ?? "[]")) as Capability[];
+    } catch {
+      extra = [];
+    }
+    const caps = capabilitiesFor(String(member.staff_role ?? "player") as StaffRole, extra);
+    return json(await this.applyAction(body, caps));
   }
 
   /**
@@ -485,9 +496,13 @@ export class SimObject {
     return { refusal: seat ? `You can only act for the country you hold (${seat})` : "Claim a country before acting for one" };
   }
 
-  private async applyAction(body: { type: string; userId?: string; [k: string]: unknown }): Promise<{ ok: boolean; message: string; data?: unknown }> {
+  private async applyAction(body: { type: string; userId?: string; [k: string]: unknown }, caps: Capability[]): Promise<{ ok: boolean; message: string; data?: unknown }> {
     await this.load(this.worldId());
     const w = this.world!;
+    // One table for both the named actions and the world commands they can reach.
+    const needed = ACTION_CAPABILITIES[body.type];
+    if (!needed) return { ok: false, message: `Unknown action "${body.type}"` };
+    if (!caps.includes(needed)) return { ok: false, message: `Missing capability: ${needed}` };
     const actor = String(body.userId ?? "");
     const seat = await this.seatFor(this.worldId(), actor, w);
 

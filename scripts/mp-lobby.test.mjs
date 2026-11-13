@@ -384,6 +384,44 @@ async function main() {
   });
   check("a code that is not a country at all is refused", badShape.status === 400, `status ${badShape.status} ${JSON.stringify(badShape.body)}`);
 
+  // --- the command path sits behind the capability table ---
+  const devCmd = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: players[1].cookie },
+    body: JSON.stringify({ type: "advance", days: 365 }),
+  });
+  check("a member cannot move the world clock", devCmd.status === 403 && /dev.directives/.test(JSON.stringify(devCmd.body)), `status ${devCmd.status} ${JSON.stringify(devCmd.body)}`);
+  const war = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: players[1].cookie },
+    body: JSON.stringify({ type: "declare-war", target: "USA", cause: "A test dispute." }),
+  });
+  check("a seat can declare war", war.body.ok === true, JSON.stringify(war.body));
+  const sanction = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: players[1].cookie },
+    body: JSON.stringify({ type: "sanction", target: "USA", kind: "financial" }),
+  });
+  check("a seat can impose sanctions", sanction.body.ok === true, JSON.stringify(sanction.body));
+  const debt = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: players[1].cookie },
+    body: JSON.stringify({ type: "default", haircut: 0.4 }),
+  });
+  check("a seat can default on its debt", debt.body.ok === true, JSON.stringify(debt.body));
+  const noCompany = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: players[1].cookie },
+    body: JSON.stringify({ type: "found-company", name: "Test Co" }),
+  });
+  check("a lever the role does not hold is refused", noCompany.status === 403 && /company.create/.test(JSON.stringify(noCompany.body)), `status ${noCompany.status} ${JSON.stringify(noCompany.body)}`);
+  const unknown = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: players[1].cookie },
+    body: JSON.stringify({ type: "grant", value: 1e12 }),
+  });
+  check("a type outside the table is refused", unknown.body.ok === false && /Unknown action/.test(String(unknown.body.message)), JSON.stringify(unknown.body));
+
   // --- naming another world must not reach it ---
   const beforePrivate = (await json(`/api/worlds/${PRIVATE_WORLD}/snapshot`)).body.world;
   const crossRead = await json(`/api/worlds/${PUBLIC_WORLD}/snapshot?worldId=${encodeURIComponent(PRIVATE_WORLD)}`);

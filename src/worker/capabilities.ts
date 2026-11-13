@@ -72,14 +72,81 @@ export const CAPABILITY_LABELS: Record<Capability, { label: string; group: strin
   "admin.webhook": { label: "Send webhooks", group: "Administration", description: "Post moderation messages to Discord." },
 };
 
+/**
+ * What each player action needs.
+ *
+ * This is the table for the whole action surface: the named actions the object
+ * handles directly and the world commands it forwards to runCommand. A type
+ * missing from here is not a player action and is refused, so routing a command
+ * to the simulation cannot quietly widen what a member can do.
+ */
+export const ACTION_CAPABILITIES: Record<string, Capability> = {
+  "claim-country": "world.play",
+  vote: "politics.vote",
+  "introduce-bill": "politics.legislate",
+  "set-policy": "politics.legislate",
+  trade: "economy.trade",
+  "raise-referendum": "politics.legislate",
+  "found-company": "company.create",
+  "create-politician": "world.play",
+  "join-party": "politics.campaign",
+  "found-party": "politics.campaign",
+  "run-for-office": "politics.campaign",
+  campaign: "politics.campaign",
+  "appoint-minister": "politics.appoint",
+  "chat-history": "world.play",
+
+  // World commands, each behind the lever it actually pulls.
+  "choose-country": "world.play",
+  "apply-policy": "politics.legislate",
+  "set-sector": "politics.legislate",
+  "set-rate": "politics.legislate",
+  "set-independence": "politics.legislate",
+  "set-printing": "politics.legislate",
+  "set-target": "politics.legislate",
+  "set-qe": "politics.legislate",
+  "set-regime": "politics.legislate",
+  "stabilisation-plan": "politics.legislate",
+  "trade-barrier": "diplomacy.treaty",
+  sanction: "diplomacy.sanction",
+  "lift-sanction": "diplomacy.sanction",
+  "declare-war": "diplomacy.war",
+  "set-stance": "military.command",
+  "propose-peace": "diplomacy.treaty",
+  "seek-peace": "diplomacy.treaty",
+  "offer-treaty": "diplomacy.treaty",
+  "leave-treaty": "diplomacy.treaty",
+  "diplomatic-mission": "diplomacy.treaty",
+  "imf-bailout": "politics.legislate",
+  default: "politics.legislate",
+  nationalise: "politics.legislate",
+  privatise: "politics.legislate",
+  "bail-out": "politics.legislate",
+  "set-policy-lever": "politics.legislate",
+  appoint: "politics.appoint",
+  "emergency-powers": "politics.legislate",
+  "call-election": "politics.legislate",
+  military: "military.command",
+
+  // Not a player lever anywhere.
+  advance: "dev.directives",
+  "set-speed": "dev.directives",
+};
+
 /** Baseline capability grants by staff role. */
 export const ROLE_CAPABILITIES: Record<StaffRole, Capability[]> = {
-  player: ["world.play", "economy.trade", "economy.invest", "politics.vote", "politics.legislate", "politics.campaign", "politics.appoint", "character.create"],
+  // A player governs a country, so the government levers of that seat are
+  // deliberately part of the role: war, sanctions, treaties and the military.
+  player: [
+    "world.play", "economy.trade", "economy.invest", "politics.vote", "politics.legislate",
+    "politics.campaign", "politics.appoint", "character.create",
+    "diplomacy.treaty", "diplomacy.war", "diplomacy.sanction", "military.command",
+  ],
   moderator: ["world.play", "economy.trade", "economy.invest", "politics.vote", "politics.legislate", "politics.campaign", "politics.appoint", "character.create", "moderation.warn", "moderation.mute"],
   developer: [
     "world.play", "world.create", "economy.trade", "economy.invest", "economy.ledger",
     "politics.vote", "politics.legislate", "politics.campaign", "politics.appoint",
-    "diplomacy.treaty", "military.command", "character.create",
+    "diplomacy.treaty", "diplomacy.war", "diplomacy.sanction", "military.command", "character.create",
     "scenario.create", "scenario.edit", "rules.manage", "dev.console", "dev.worldedit", "dev.directives",
     "moderation.warn",
   ],

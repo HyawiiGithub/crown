@@ -38,7 +38,7 @@ import {
   upsertUser,
   verifyState,
 } from "./auth";
-import { ALL_CAPABILITIES, CAPABILITY_LABELS, AuthError, capabilitiesFor, has, isDev, isStaff, requireCapability } from "./capabilities";
+import { ACTION_CAPABILITIES, ALL_CAPABILITIES, CAPABILITY_LABELS, AuthError, capabilitiesFor, has, isDev, isStaff, requireCapability } from "./capabilities";
 
 
 export type AppEnv = { Bindings: Env; Variables: { user: User | null } };
@@ -639,25 +639,7 @@ app.post("/api/worlds/:id/action", async (c) => {
   const body = (await c.req.json()) as Record<string, unknown>;
   const type = String(body.type ?? "");
 
-  const NEEDED: Record<string, Capability> = {
-    "claim-country": "world.play",
-    vote: "politics.vote",
-    "introduce-bill": "politics.legislate",
-    "set-policy": "politics.legislate",
-    trade: "economy.trade",
-    "raise-referendum": "politics.legislate",
-    "found-company": "company.create",
-    "create-politician": "world.play",
-    "join-party": "politics.campaign",
-    "found-party": "politics.campaign",
-    "run-for-office": "politics.campaign",
-    campaign: "politics.campaign",
-    "appoint-minister": "politics.appoint",
-    "chat-history": "world.play",
-    advance: "dev.directives",
-    "set-speed": "dev.directives",
-  };
-  const cap = NEEDED[type];
+  const cap = ACTION_CAPABILITIES[type];
   if (cap) requireCapability(u, cap);
 
   const member = await c.env.DB.prepare(`SELECT 1 AS ok FROM world_members WHERE world_id = ? AND user_id = ?`)
