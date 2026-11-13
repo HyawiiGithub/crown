@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { User, WorldDirective } from "../shared/types";
 import { WorldMap, type MapLayer } from "./components/Map";
-import { CountryPanel, CrisisBanner, EventPopup, MarketPanel, PeaceDeal, RankingPanel, VoteTray, WarPanel } from "./components/panels";
+import { CountryPanel, CrisisBanner, MarketPanel, NewspaperButton, PeaceDeal, RankingPanel, VoteTray, WarPanel } from "./components/panels";
 import { DevMenu } from "./components/DevMenu";
 import { TickerList, Lobby } from "./components/Lobby";
 import { applyTheme, themeFromScenario, type Theme } from "./theme";
@@ -276,6 +276,7 @@ function WorldShell() {
       <header className="masthead">
         <span className="masthead__title">{scenario?.theme.masthead ?? "CROWN"}</span>
         <span className="masthead__date mono">{scenario ? simDate(scenario.startDate, s.simTime) : ""}</span>
+        <NewspaperButton />
         <ConnectionDot />
         <span className="row time-controls" role="group" aria-label="Game speed">
           <button className={`btn btn--sm ${s.paused ? "btn--active" : ""}`} onClick={() => setClock({ paused: !s.paused })} title="Pause or resume (Space)">{s.paused ? "Play" : "Pause"}</button>
@@ -353,7 +354,6 @@ function WorldShell() {
 
       <PeaceDeal />
       <VoteTray />
-      <EventPopup />
 
       <nav className="mobile-nav" aria-label="Game views">
         {([["map", "Map"], ["news", "News"], ["country", "Country"]] as const).map(([id, label]) => (

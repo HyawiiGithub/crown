@@ -1254,3 +1254,49 @@ export function EventPopup() {
     </div>
   );
 }
+/** The front page: events as a newspaper instead of cards over the budget. */
+export function NewspaperButton() {
+  const events = useStore((s) => s.events);
+  const countries = useStore((s) => s.countries);
+  const start = useStore((s) => s.scenario?.startDate);
+  const [open, setOpen] = useState(false);
+  const stories = useMemo(() => [...events].reverse(), [events]);
+  if (!stories.length) return null;
+  const lead = stories[0];
+  const urgent = stories.filter((e) => e.severity === "catastrophic").length;
+  return (
+    <>
+      <button className="btn btn--sm" onClick={() => setOpen(true)} title="Open the newspaper">
+        Newspaper{urgent ? ` · ${urgent}` : ""}
+      </button>
+      {open && (
+        <div className="modal" role="dialog" aria-modal="true" onClick={() => setOpen(false)}>
+          <div className="card" style={{ width: "min(860px, 94vw)", maxHeight: "86vh", overflow: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ borderBottom: "2px solid var(--rule)", paddingBottom: 8, marginBottom: 12 }}>
+              <div className="row">
+                <strong style={{ fontSize: 22, letterSpacing: 1 }}>THE CROWN GAZETTE</strong>
+                <span className="grow" />
+                <button className="btn btn--sm" onClick={() => setOpen(false)}>Close</button>
+              </div>
+              <div className="dim" style={{ fontSize: 11 }}>{start ? simDate(start, lead.t) : ""} · {stories.length} stories</div>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 19, fontWeight: 700, lineHeight: 1.2 }}>{lead.title}</div>
+              <div className="dim" style={{ fontSize: 11 }}>{lead.country ? countries[lead.country]?.name ?? lead.country : "World"} · {lead.kind}</div>
+              <div style={{ fontSize: 13, marginTop: 4 }}>{lead.body}</div>
+            </div>
+            <div style={{ columnCount: 2, columnGap: 20 }}>
+              {stories.slice(1).map((e) => (
+                <div key={e.id} style={{ breakInside: "avoid", marginBottom: 12 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{e.title}</div>
+                  <div className="dim" style={{ fontSize: 11 }}>{start ? simDate(start, e.t) : ""} · {e.country ? countries[e.country]?.name ?? e.country : "World"}</div>
+                  <div style={{ fontSize: 12 }}>{e.body}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
