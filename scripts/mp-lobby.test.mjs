@@ -260,6 +260,52 @@ async function main() {
   const seatedAfter = (await json(`/api/worlds/${PUBLIC_WORLD}/members`)).body.members ?? [];
   check("claiming a nation moves the claimant's seat", seatedAfter.find((m) => m.userId === owner.id)?.country === "BEL", JSON.stringify(seatedAfter.map((m) => [m.userId, m.country])));
 
+  // --- each member's seat decides which country their command moves ---
+  const [leverA, leverB] = await Promise.all([
+    json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: owner.cookie },
+      body: JSON.stringify({ type: "set-policy", area: "environment", value: 31 }),
+    }),
+    json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: players[1].cookie },
+      body: JSON.stringify({ type: "set-policy", area: "environment", value: 74 }),
+    }),
+  ]);
+  check("two members act at once and both are accepted", leverA.body.ok === true && leverB.body.ok === true, `${JSON.stringify(leverA.body)} | ${JSON.stringify(leverB.body)}`);
+  check("each command names the country its own actor holds", /BEL/.test(String(leverA.body.message)) && /ESP/.test(String(leverB.body.message)), `${leverA.body.message} | ${leverB.body.message}`);
+  const seatedWorld = (await json(`/api/worlds/${PUBLIC_WORLD}/snapshot`)).body.world;
+  check("the first member's lever moved their own country", seatedWorld.countries.BEL.policies.environment === 31, String(seatedWorld.countries.BEL.policies.environment));
+  check("the second member's lever moved their own country", seatedWorld.countries.ESP.policies.environment === 74, String(seatedWorld.countries.ESP.policies.environment));
+  check("the world records one seat per member", seatedWorld.seats?.[owner.id] === "BEL" && seatedWorld.seats?.[players[1].id] === "ESP", JSON.stringify(seatedWorld.seats));
+
+  const crossed = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: players[1].cookie },
+    body: JSON.stringify({ type: "set-policy", area: "environment", value: 99, country: "BEL" }),
+  });
+  check("a member cannot move another member's country", crossed.body.ok === false && /country you hold/.test(String(crossed.body.message)), JSON.stringify(crossed.body));
+  const seatedAgain = (await json(`/api/worlds/${PUBLIC_WORLD}/snapshot`)).body.world;
+  check("the refused attempt changed nothing", seatedAgain.countries.BEL.policies.environment === 31, String(seatedAgain.countries.BEL.policies.environment));
+
+  const seatless = await json(`/api/worlds/${WIDE_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: capped[2].cookie },
+    body: JSON.stringify({ type: "set-policy", area: "environment", value: 5 }),
+  });
+  check("a member with no country is refused a country lever", seatless.body.ok === false && /Claim a country/.test(String(seatless.body.message)), JSON.stringify(seatless.body));
+
+  // --- a world command uses the same seat ---
+  const barrier = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: players[1].cookie },
+    body: JSON.stringify({ type: "trade-barrier", partner: "GBR", value: 0.5 }),
+  });
+  check("a world command runs for the actor's own country", barrier.body.ok === true, JSON.stringify(barrier.body));
+  const afterBarrier = (await json(`/api/worlds/${PUBLIC_WORLD}/snapshot`)).body.world;
+  check("the barrier landed on the actor's country, not a global one", Boolean(afterBarrier.countries.ESP.tradeBarriers?.GBR) && !afterBarrier.countries.BEL.tradeBarriers?.GBR, JSON.stringify(afterBarrier.countries.ESP.tradeBarriers ?? {}));
+
   // --- naming another world must not reach it ---
   const beforePrivate = (await json(`/api/worlds/${PRIVATE_WORLD}/snapshot`)).body.world;
   const crossRead = await json(`/api/worlds/${PUBLIC_WORLD}/snapshot?worldId=${encodeURIComponent(PRIVATE_WORLD)}`);

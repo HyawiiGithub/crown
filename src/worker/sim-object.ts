@@ -30,6 +30,7 @@ import {
   type CampaignKind,
 } from "../sim/politics-players";
 import { runDevOp } from "../sim/dev-ops";
+import { runCommand } from "../sim/commands";
 import { pushEvent, recomputeGlobals } from "../sim/bootstrap";
 import { Rng, clamp } from "../sim/rng";
 
@@ -445,9 +446,32 @@ export class SimObject {
     return json(await this.applyAction(body));
   }
 
+  /**
+   * The country this member holds here, or null if they have not taken one.
+   *
+   * The world keeps its own record of seats so a command never has to trust a
+   * country sent by the client; a reservation made at join is adopted on the
+   * member's first action.
+   */
+  private async seatFor(worldId: string, userId: string, w: World): Promise<string | null> {
+    w.seats ??= {};
+    const known = w.seats[userId];
+    if (known && w.countries[known]) return known;
+    const row = await this.env.DB.prepare(`SELECT plays_country FROM world_members WHERE world_id = ? AND user_id = ?`)
+      .bind(worldId, userId)
+      .first<{ plays_country: string | null }>()
+      .catch(() => null);
+    const reserved = row?.plays_country ?? null;
+    if (!reserved || !w.countries[reserved]) return null;
+    w.seats[userId] = reserved;
+    return reserved;
+  }
+
   private async applyAction(body: { type: string; userId?: string; [k: string]: unknown }): Promise<{ ok: boolean; message: string; data?: unknown }> {
     await this.load(this.worldId());
     const w = this.world!;
+    const actor = String(body.userId ?? "");
+    const seat = await this.seatFor(this.worldId(), actor, w);
 
     try {
       switch (body.type) {
@@ -481,6 +505,8 @@ export class SimObject {
             }
           }
           pushEvent(w, { kind: "political", severity: "info", country: iso3, title: `${body.username ?? "A player"} takes the reins in ${c.name}`, body: `The government of ${c.name} is now in human hands.`, byUserId: body.userId, tags: ["player"] });
+          w.seats ??= {};
+          w.seats[userId] = iso3;
           return { ok: true, message: `You now govern ${c.name}` };
         }
         case "vote": {
@@ -518,11 +544,14 @@ export class SimObject {
           return bill ? { ok: true, message: "Bill introduced" } : { ok: false, message: "Could not introduce" };
         }
         case "set-policy": {
-          const c = w.countries[String(body.country ?? "")];
-          const area = String(body.area ?? "") as keyof typeof c.policies;
-          if (!c || !(area in c.policies)) return { ok: false, message: "Unknown policy area" };
-          c.policies[area] = clamp(Number(body.value ?? 0), -100, 100);
-          return { ok: true, message: `${area} policy set to ${c.policies[area]}` };
+          if (!seat) return { ok: false, message: "Claim a country before changing its policy" };
+          const held = w.countries[seat];
+          if (!held) return { ok: false, message: "That country is not in this world" };
+          if (body.country !== undefined && String(body.country) !== seat) return { ok: false, message: "You can only act for the country you hold" };
+          const area = String(body.area ?? "") as keyof typeof held.policies;
+          if (!(area in held.policies)) return { ok: false, message: "Unknown policy area" };
+          held.policies[area] = clamp(Number(body.value ?? 0), -100, 100);
+          return { ok: true, message: `${seat}: ${area} policy set to ${held.policies[area]}` };
         }
         case "trade": {
           const co = w.companies[String(body.companyId ?? "")];
@@ -642,8 +671,15 @@ export class SimObject {
           );
         case "chat-history":
           return { ok: true, message: "ok", data: this.chat };
-        default:
-          return { ok: false, message: `Unknown action "${body.type}"` };
+        default: {
+          // Everything else is a world command, and it acts on the country
+          // this member holds. The shared clock is not a player lever.
+          if (body.type === "advance" || body.type === "set-speed") {
+            return { ok: false, message: "Only a developer can move a world's clock" };
+          }
+          if (!this.engine || !this.rng) return { ok: false, message: "The world is not running yet" };
+          return runCommand(w, this.engine, this.rng, body, seat ?? undefined);
+        }
       }
     } catch (err) {
       return { ok: false, message: err instanceof Error ? err.message : "Action failed" };

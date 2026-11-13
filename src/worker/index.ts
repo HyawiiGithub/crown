@@ -633,6 +633,8 @@ app.post("/api/worlds/:id/action", async (c) => {
     campaign: "politics.campaign",
     "appoint-minister": "politics.appoint",
     "chat-history": "world.play",
+    advance: "dev.directives",
+    "set-speed": "dev.directives",
   };
   const cap = NEEDED[type];
   if (cap) requireCapability(u, cap);

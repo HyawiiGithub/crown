@@ -84,7 +84,14 @@ function enact(world: World, c: Country, patch: PolicyPatch): CommandResult {
   return { ok: true, message: `Decreed: ${d.summary}` };
 }
 
-export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Record<string, unknown>): CommandResult {
+/**
+ * Run one player command.
+ *
+ * `seat` is the country the actor holds in a shared world. When it is given,
+ * every command targets that country; when it is absent (singleplayer) the
+ * command targets world.playerCountry, which is the only country that player has.
+ */
+export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Record<string, unknown>, seat?: string): CommandResult {
   const type = String(body.type ?? "");
   if (type === "set-speed") {
     const out = setSpeed(world, Number(body.speed ?? world.speed), body.paused === undefined ? undefined : Boolean(body.paused));
@@ -97,14 +104,16 @@ export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Reco
     return { ok: true, message: `Advanced ${body.days} days.` };
   }
   if (type === "choose-country") {
+    if (seat) return { ok: false, message: "Your orders apply to the country you hold, not to one chosen per command." };
     const c = world.countries[String(body.country ?? "")];
     if (!c || c.annexedBy) return { ok: false, message: "That state does not exist." };
     world.playerCountry = c.id;
     return { ok: true, message: `You now govern ${c.name}.` };
   }
 
-  const c = world.playerCountry ? world.countries[world.playerCountry] : undefined;
-  if (!c) return { ok: false, message: "Choose a country to govern first." };
+  const governed = seat ?? world.playerCountry;
+  const c = governed ? world.countries[governed] : undefined;
+  if (!c) return { ok: false, message: seat ? "Claim a country before giving orders." : "Choose a country to govern first." };
   if (c.annexedBy) return { ok: false, message: `${c.name} no longer exists.` };
   const e = c.economy;
 
@@ -208,7 +217,7 @@ export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Reco
       c.relations[p.id] = clamp((c.relations[p.id] ?? 0) - value * 25, -100, 100);
       p.relations[c.id] = clamp((p.relations[c.id] ?? 0) - value * 30, -100, 100);
       p.tradeBarriers ??= {};
-      if (value >= 0.2 && p.id !== world.playerCountry && (p.relations[c.id] ?? 0) < 10) p.tradeBarriers[c.id] = value * 0.6;
+      if (value >= 0.2 && p.id !== c.id && (p.relations[c.id] ?? 0) < 10) p.tradeBarriers[c.id] = value * 0.6;
       if (value >= 1 || value >= 0.25) pushEvent(world, { kind: "diplomatic", severity: "major", country: c.id, title: value >= 1 ? `${c.name} embargoes ${p.name}` : `${c.name} raises tariffs on ${p.name}`, body: `An extra ${(value * 100).toFixed(0)}% barrier on bilateral trade.`, actors: [c.id, p.id], tags: ["trade"] });
       return { ok: true, message: value > 0 ? `${(value * 100).toFixed(0)}% barrier on ${p.name}.` : `Trade with ${p.name} normalised.` };
     }
