@@ -153,6 +153,14 @@ async function main() {
   const HOST_COOKIE = `crown_session=${HOST_TOKEN}`;
   d1(`INSERT INTO users (id, platform, platform_id, username, staff_role, capabilities_json, created_at, last_seen_at) VALUES ('${HOST_ID}', 'test', 'mp-host', 'mp_host', 'player', '["world.create"]', ${now}, ${now})`);
   d1(`INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES ('${createHash("sha256").update(HOST_TOKEN).digest("base64url")}', '${HOST_ID}', ${now}, ${now + 3600000})`);
+  // Promoted straight in the database, with the capability list a sign-up
+  // writes. Nothing in the row grants world.create, so hosting proves the
+  // role is folded into the parsed user.
+  const PROMOTED_TOKEN = "mp-promoted-token";
+  const PROMOTED_ID = "u-mp-promoted";
+  const PROMOTED_COOKIE = `crown_session=${PROMOTED_TOKEN}`;
+  d1(`INSERT INTO users (id, platform, platform_id, username, staff_role, capabilities_json, created_at, last_seen_at) VALUES ('${PROMOTED_ID}', 'test', 'mp-promoted', 'mp_promoted', 'developer', '["world.play","economy.trade"]', ${now}, ${now})`);
+  d1(`INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES ('${createHash("sha256").update(PROMOTED_TOKEN).digest("base64url")}', '${PROMOTED_ID}', ${now}, ${now + 3600000})`);
   await startDev();
   console.log("worker ready on", BASE);
 
@@ -593,6 +601,22 @@ async function main() {
   check("the other world is not mutated by the attempt", beforePrivate.version === afterPrivate.version && beforePrivate.events.length === afterPrivate.events.length, `${beforePrivate.version}/${beforePrivate.events.length} -> ${afterPrivate.version}/${afterPrivate.events.length}`);
   check("the named world was never loaded under the addressed one", Boolean(afterPrivate.countries && Object.keys(afterPrivate.countries).length > 50));
   ws.close();
+  // --- a role promoted in the database reaches the parsed user ---
+  const promotedMe = await json("/api/auth/me", { headers: { cookie: PROMOTED_COOKIE } });
+  check("a database promotion reaches the parsed user", promotedMe.body.user?.staffRole === "developer" && promotedMe.body.user?.capabilities?.includes("world.create"), JSON.stringify({ role: promotedMe.body.user?.staffRole, caps: promotedMe.body.user?.capabilities }));
+  const promotedHost = await json("/api/worlds", {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: PROMOTED_COOKIE },
+    body: JSON.stringify({ scenarioId: "2026", name: "Promoted Host", maxPlayers: 4 }),
+  });
+  check("a developer promoted in the database can host", promotedHost.body.ok === true && typeof promotedHost.body.id === "string", JSON.stringify(promotedHost.body));
+  const playerHost = await json("/api/worlds", {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: players[4].cookie },
+    body: JSON.stringify({ scenarioId: "2026", name: "Player Host" }),
+  });
+  check("a plain player still cannot host", playerHost.status === 403, `${playerHost.status} ${JSON.stringify(playerHost.body)}`);
+  check("the promoted host owns the world it made", (await json(`/api/worlds/${promotedHost.body.id}/lobby`, { headers: { cookie: PROMOTED_COOKIE } })).body.you?.host === true, String(promotedHost.body.id));
   // --- the lobby: a host opens a world, members claim nations, a countdown holds the clock ---
   const created = await json("/api/worlds", {
     method: "POST",
