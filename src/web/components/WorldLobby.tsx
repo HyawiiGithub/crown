@@ -52,8 +52,10 @@ export function WorldLobby({ id, onBack }: { id: string; onBack: () => void }) {
   const load = useCallback(async () => {
     try {
       const r = await api<LobbyPayload>(`/api/worlds/${encodeURIComponent(id)}/lobby`);
-      setWorld(r.world);
-      setYou(r.you);
+      // Only re-render when the lobby actually changed: a poll that rebuilds the
+      // nation list every few seconds can swallow a click mid-press.
+      setWorld((prev) => (prev && JSON.stringify(prev) === JSON.stringify(r.world) ? prev : r.world));
+      setYou((prev) => (prev && JSON.stringify(prev) === JSON.stringify(r.you) ? prev : r.you));
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not open that lobby");
