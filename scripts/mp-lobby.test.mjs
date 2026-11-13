@@ -587,6 +587,41 @@ async function main() {
   });
   check("a type outside the table is refused", unknown.body.ok === false && /Unknown action/.test(String(unknown.body.message)), JSON.stringify(unknown.body));
 
+  // --- the panels' action surface: each command lands on the seat, not a local sim ---
+  const panel = (body, cookie = players[1].cookie) => json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie },
+    body: JSON.stringify(body),
+  });
+  const panelRead = async () => (await json(`/api/worlds/${PUBLIC_WORLD}/snapshot`, { headers: { cookie: players[1].cookie } })).body.world;
+  const beforePanel = await panelRead();
+  const press = {
+    policy: await panel({ type: "apply-policy", budget: { welfare: 0.12 } }),
+    rate: await panel({ type: "set-rate", value: 0.04 }),
+    research: await panel({ type: "set-research", focus: "industry" }),
+    divisions: await panel({ type: "set-divisions", infantry: 0.5, armour: 0.3, artillery: 0.2 }),
+    aid: await panel({ type: "send-aid", target: "PRT", share: 0.01 }),
+    barrier: await panel({ type: "trade-barrier", partner: "PRT", value: 0.2 }),
+    sanction: await panel({ type: "sanction", target: "PRT", kind: "financial" }),
+    emergency: await panel({ type: "emergency-powers", value: true }),
+    imf: await panel({ type: "imf-bailout" }),
+  };
+  const unproxied = Object.entries(press).filter(([, r]) => /Missing capability|Unknown action/.test(String(r.body.message ?? r.body.error ?? "")));
+  check("every panel action reaches the command layer", unproxied.length === 0, JSON.stringify(unproxied.map(([k, r]) => [k, r.body])));
+  const afterPanel = await panelRead();
+  const esp = afterPanel.countries.ESP;
+  const espPolicyBill = Object.values(afterPanel.bills ?? {}).find((b) => b.country === "ESP" && b.policy?.budget?.welfare === 0.12);
+  check("apply-policy lands on the seat as a decree or a bill", press.policy.body.ok === true && (Math.abs(esp.economy.budget.welfare - 0.12) < 1e-9 || Boolean(espPolicyBill)), `${JSON.stringify(press.policy.body)} budget ${esp.economy.budget.welfare} bill ${Boolean(espPolicyBill)}`);
+  check("set-rate either moves the seat's rate or is refused by its bank, never by the gate", press.rate.body.ok === true ? Math.abs(esp.economy.monetary.centralBankRate - 0.04) < 1e-9 : /independent|union/.test(String(press.rate.body.message)), JSON.stringify(press.rate.body));
+  check("set-research redirects the seat's research", press.research.body.ok === true && esp.tech?.focus === "industry", `${JSON.stringify(press.research.body)} focus ${esp.tech?.focus}`);
+  check("set-divisions reorganises the seat's army", press.divisions.body.ok === true && Math.abs(esp.military.divisions.armour - 0.3) < 1e-9, JSON.stringify(press.divisions.body));
+  check("send-aid moves money from the seat to the target", press.aid.body.ok === true && esp.economy.fiscal.debt > beforePanel.countries.ESP.economy.fiscal.debt && afterPanel.countries.PRT.economy.fiscal.debt < beforePanel.countries.PRT.economy.fiscal.debt, `${JSON.stringify(press.aid.body)} esp ${beforePanel.countries.ESP.economy.fiscal.debt}->${esp.economy.fiscal.debt} prt ${beforePanel.countries.PRT.economy.fiscal.debt}->${afterPanel.countries.PRT.economy.fiscal.debt}`);
+  check("trade-barrier records the barrier on the seat", press.barrier.body.ok === true && Math.abs((esp.tradeBarriers?.PRT ?? 0) - 0.2) < 1e-9, `${JSON.stringify(press.barrier.body)} ${esp.tradeBarriers?.PRT}`);
+  check("sanction records the seat as imposer and the target as subject", press.sanction.body.ok === true && Object.values(afterPanel.sanctions ?? {}).some((x) => (x.imposedBy ?? []).includes("ESP") && x.on === "PRT"), JSON.stringify(press.sanction.body));
+  check("emergency-powers changes the seat and only the seat", press.emergency.body.ok === true && esp.executive.emergencyPowers === true && afterPanel.countries.FRA.executive.emergencyPowers !== true, JSON.stringify(press.emergency.body));
+  check("a panel action outside its era is refused by policy, not capability", press.imf.body.ok === false && /no IMF/.test(String(press.imf.body.message)), JSON.stringify(press.imf.body));
+  const seatlessWide = await json(`/api/worlds/${WIDE_WORLD}/action`, { method: "POST", headers: { "content-type": "application/json", cookie: capped[2].cookie }, body: JSON.stringify({ type: "send-aid", target: "PRT", share: 0.01 }) });
+  check("a seatless member's panel command is refused before it changes anything", seatlessWide.body.ok === false && /Choose a country|Claim a country/.test(String(seatlessWide.body.message)), JSON.stringify(seatlessWide.body));
   // --- naming another world must not reach it ---
   const beforePrivate = (await json(`/api/worlds/${PRIVATE_WORLD}/snapshot`)).body.world;
   const crossRead = await json(`/api/worlds/${PUBLIC_WORLD}/snapshot?worldId=${encodeURIComponent(PRIVATE_WORLD)}`);
