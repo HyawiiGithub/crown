@@ -133,13 +133,22 @@ function stepMacro(world: World, c: Country, rnd: Rng, anchorRate: number, ancho
   const avgLabourTax = tax.income + tax.payroll;
   const participationTarget = clamp(0.42 + relIncome * 0.12 + (world.startDate.year >= 1990 ? 0.04 : 0) - Math.max(0, avgLabourTax - 0.3) * 0.12 + e.labour.satisfaction * 0.02, 0.32, 0.72);
   e.labour.participation = approach(e.labour.participation, participationTarget, 0.1 * dt);
+  // Demographic transition: births fall as income and participation rise, deaths
+  // fall with health spending, and war cuts both.
+  const fertility = clamp(0.034 - relIncome * 0.03 - e.labour.participation * 0.02, 0.001, 0.05);
+  const mortality = clamp(0.026 - budget.health * 0.22 - institutions * 0.004 + warDamage * 0.4, 0.004, 0.05);
+  m.popGrowth = approach(m.popGrowth, clamp(fertility - mortality, -0.03, 0.045), 0.15 * dt);
   const popGrowth = clamp(m.popGrowth - warDamage * 0.15 + (c.policies.immigration ?? 0) * 0.00005, -0.05, 0.05);
   e.population = Math.max(1000, pop * Math.exp(popGrowth * dt));
 
   const realInvestment = e.accounts.investment / Math.max(1e-6, m.priceLevel);
-  const capitalGrowth = realInvestment / Math.max(1, m.capital) - 0.05;
-  m.capital = Math.max(1, m.capital * Math.exp(clamp(capitalGrowth, -0.15, 0.2) * dt));
-  m.potentialGrowth = clamp(m.tfpGrowth + 0.35 * capitalGrowth + 0.65 * popGrowth, -0.2, 0.15) * P.growthBias;
+  // Depreciation is a real charge and capital cannot outrun the economy for long:
+  // without this the capital term alone added seven points of growth every year.
+  const capitalGrowth = realInvestment / Math.max(1, m.capital) - 0.06;
+  m.capital = Math.max(1, m.capital * Math.exp(clamp(capitalGrowth, -0.15, 0.08) * dt));
+  // Diminishing returns by income: 1.5% at the frontier, at most 6% while catching up.
+  const growthCeiling = 0.015 + Math.max(0, 1 - relIncome) * 0.045;
+  m.potentialGrowth = clamp(m.tfpGrowth + 0.35 * capitalGrowth + 0.65 * popGrowth, -0.15, Math.min(0.06, growthCeiling)) * P.growthBias;
   m.potential *= Math.exp(m.potentialGrowth * dt);
 
   // ---- 2. Interest rates --------------------------------------------------
