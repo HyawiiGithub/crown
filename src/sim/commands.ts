@@ -230,6 +230,20 @@ export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Reco
       c.executive.approval = clamp(c.executive.approval + (rulesByDecree(c.government) ? 2 : -4), 0, 100);
       return { ok: true, message: war.name };
     }
+    case "send-aid": {
+      const aidTarget = world.countries[String(body.target ?? "")];
+      if (!aidTarget || aidTarget.id === c.id || aidTarget.annexedBy) return { ok: false, message: "Choose a country to aid." };
+      const share = clamp(Number(body.share ?? 0.01), 0.0005, 0.05);
+      const amount = c.economy.gdp * share;
+      if (c.economy.fiscal.debt + amount > c.economy.gdp * 3) return { ok: false, message: "You cannot borrow for that much aid." };
+      c.economy.fiscal.debt += amount;
+      aidTarget.economy.fiscal.debt = Math.max(0, aidTarget.economy.fiscal.debt - amount);
+      aidTarget.executive.approval = clamp(aidTarget.executive.approval + share * 500, 0, 100);
+      c.relations[aidTarget.id] = clamp((c.relations[aidTarget.id] ?? 0) + 5 + share * 300, -100, 100);
+      aidTarget.relations[c.id] = clamp((aidTarget.relations[c.id] ?? 0) + 8 + share * 400, -100, 100);
+      pushEvent(world, { kind: "diplomatic", severity: "notice", country: c.id, title: `${c.name} sends aid to ${aidTarget.name}`, body: `A grant of ${(share * 100).toFixed(1)}% of national income.`, actors: [c.id, aidTarget.id], tags: ["aid"] });
+      return { ok: true, message: `Aid sent to ${aidTarget.name}: ${(share * 100).toFixed(1)}% of GDP. Relations improved.` };
+    }
     case "set-divisions": {
       const infantry = clamp(Number(body.infantry ?? 0.6), 0, 1);
       const armour = clamp(Number(body.armour ?? 0.2), 0, 1);

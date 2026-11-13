@@ -274,7 +274,22 @@ function Charts({ c }: { c: Country }) {
 }
 
 function ChangeCountry({ c }: { c: Country }) {
-  return <button className="btn btn--sm" onClick={() => { if (confirm(`Stop governing your current country and take over ${c.name}?`)) void act({ type: "choose-country", country: c.id }); }}>Govern {c.name} instead</button>;
+  const player = useStore.getState().playerCountry;
+  return (
+    <>
+      {c.id !== player && (
+        <div className="row row--wrap" style={{ gap: 4, marginTop: 8, alignItems: "center" }}>
+          <span className="mono dim" style={{ fontSize: 10.5, letterSpacing: ".08em" }}>SEND AID</span>
+          {[0.005, 0.02, 0.05].map((s) => (
+            <button key={s} className="btn btn--sm" title={`Grant ${(s * 100).toFixed(1)}% of your GDP, borrowed`} onClick={() => void act({ type: "send-aid", target: c.id, share: s })}>
+              {(s * 100).toFixed(1)}% GDP
+            </button>
+          ))}
+        </div>
+      )}
+      <button className="btn btn--sm" onClick={() => { if (confirm(`Stop governing your current country and take over ${c.name}?`)) void act({ type: "choose-country", country: c.id }); }}>Govern {c.name} instead</button>
+    </>
+  );
 }
 
 function RateSlider({ label, value, max, step = 0.001, hint, disabled, onChange }: { label: string; value: number; max: number; step?: number; hint?: string; disabled?: boolean; onChange: (v: number) => void }) {
@@ -1194,7 +1209,7 @@ export function WarPanel({ wars, countries, onPick }: { wars: War[]; countries: 
           ))}
           {w.fronts.map((f) => (
             <div key={f.id} style={{ marginTop: 6 }}>
-              <div className="row" style={{ justifyContent: "space-between", fontSize: 11 }}><span className="dim truncate">{f.name}</span><span className="mono">{occupationLabel(w, f, countries)}</span></div>
+              <div className="row" style={{ justifyContent: "space-between", fontSize: 11 }}><span className="dim truncate">{f.name} · {f.terrain}</span><span className="mono">{occupationLabel(w, f, countries)}</span></div>
               <div className="front" title={`${name(w, f.belligerents[0])} on the left`}>
                 <span style={{ width: `${(f.control + 100) / 2}%`, background: countries[f.belligerents[0]]?.mapColor ?? "var(--accent-2)" }} />
                 <span style={{ flex: 1, background: countries[f.belligerents[1]]?.mapColor ?? "var(--ink-muted)" }} />

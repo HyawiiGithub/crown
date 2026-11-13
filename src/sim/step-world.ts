@@ -4,6 +4,7 @@ import { pushEvent, spawnPolity } from "./bootstrap";
 import { frontOccupation } from "./occupation";
 import { LAND_BORDERS } from "../data/borders";
 import { Rng, approach, clamp, clamp01 } from "./rng";
+import { terrainOf } from "./terrain";
 import { SECONDS_PER_YEAR } from "./step-economy";
 
 /**
@@ -417,7 +418,7 @@ export function declareWar(world: World, attacker: string, defender: string, cau
     cause,
     fronts: [overseasInvasion
       ? { id: `${id}-f0`, name: `${a.name} landings in ${d.name}`, belligerents: [attacker, defender], control: navalPower(a) >= navalPower(d) * 0.5 ? 1 : 0, contestedOutput: 0, openedAt: world.t, terrain: "coastal", attritionRate: 0.0004, overseas: true, theatre: defender, axis: d.lon !== undefined && d.lat !== undefined ? [d.lon - 3, d.lat, d.lon + 3, d.lat] : undefined }
-      : { id: `${id}-f0`, name: `${a.name} - ${d.name} Front`, belligerents: [attacker, defender], control: 0, contestedOutput: 0, openedAt: world.t, terrain: "plains", attritionRate: 0.0004 }],
+      : { id: `${id}-f0`, name: `${a.name} - ${d.name} Front`, belligerents: [attacker, defender], control: 0, contestedOutput: 0, openedAt: world.t, terrain: terrainOf(d), attritionRate: 0.0004 }],
     exhaustion: { [attacker]: 4, [defender]: 4 },
     casualties: {},
     materiel: {},
