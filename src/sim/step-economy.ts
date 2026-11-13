@@ -97,7 +97,8 @@ function stepMacro(world: World, c: Country, rnd: Rng, anchorRate: number, ancho
   const institutions = clamp01(1 - e.corruption);
   const base = m.baseBudget;
   const lever = (cur: number, ref: number, weight: number, cap: number) => clamp(weight * (cur / Math.max(1e-4, ref) - 1), -cap, cap);
-  const tfpFromPolicy = lever(budget.education, base.education, 0.006, 0.01) + lever(budget.science, base.science, 0.006, 0.012) + lever(budget.infrastructure, base.infrastructure, 0.005, 0.008);
+  const tfpFromPolicy = lever(budget.education, base.education, 0.006, 0.01) + lever(budget.science, base.science, 0.006, 0.012) + lever(budget.infrastructure, base.infrastructure, 0.005, 0.008) +
+    (c.tech?.industry ?? 0) * 0.004;
   // Conditional convergence: poor countries catch up only if institutions let them.
   const catchUp = clamp(-Math.log(relIncome) * 0.006 * institutions * institutions * 1.4, 0, 0.035);
   const avgRegulation = e.sectors.reduce((a, s) => a + s.regulation * s.share, 0);

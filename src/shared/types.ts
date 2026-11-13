@@ -895,6 +895,16 @@ export type MilitaryBranch =
   | "cyber"
   | "nuclear";
 
+/** Research levels and the field the science budget is pointed at. */
+export interface TechState {
+  army: number;
+  logistics: number;
+  industry: number;
+  /** Progress towards the next level in the current field. */
+  points: number;
+  focus: "army" | "logistics" | "industry";
+}
+
 export interface MilitaryState {
   activeDuty: number;
   reserves: number;
@@ -1216,6 +1226,8 @@ export interface Country {
   unrest: UnrestEvent[];
   /** Population in millions. */
   flagEmoji: string;
+  /** Research progress. */
+  tech?: TechState;
   /** Crisis, when the state is coming apart. */
   crisis?: CrisisState;
   /** Occupier, if any. */
@@ -1439,6 +1451,8 @@ export interface Scenario {
  * from the Dev Console at runtime.
  */
 export interface SimulationParams {
+  /** Multiplier on research points earned from the science budget. */
+  researchSpeed: number;
   /** Chance per country per week that the population starts a new firm. */
   firmFormation: number;
   /** Real seconds per simulation tick. */

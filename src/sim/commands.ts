@@ -6,6 +6,7 @@ import { clamp, clamp01, type Rng } from "./rng";
 import { applyPolicy, introduceBill, needsLegislature } from "./step-politics";
 import { answerCrisis } from "./collapse";
 import { foundCompany } from "./firms";
+import { techOf } from "./tech";
 import { SECTORS } from "../data/economy";
 import { annex, createPuppetState, declareWar, imposeSanction, liftSanction, signTreaty, transferLand, vassalise } from "./step-world";
 import { frontOccupation, peaceAccepted, peaceCost, peaceStanding, type PeaceTerms } from "./occupation";
@@ -155,6 +156,12 @@ export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Reco
       if (e.centralBank.regime === "union") return { ok: false, message: "Asset purchases are run by the currency union." };
       e.centralBank.qe = clamp(Number(body.value), 0, 1);
       return { ok: true, message: `Central bank holdings set to ${(e.centralBank.qe * 100).toFixed(0)}% of GDP.` };
+    }
+    case "set-research": {
+      const focus = String(body.focus ?? "");
+      if (focus !== "army" && focus !== "logistics" && focus !== "industry") return { ok: false, message: "Unknown field." };
+      techOf(c).focus = focus;
+      return { ok: true, message: `Research redirected to ${focus}.` };
     }
     case "sponsor-firm": {
       const sector = String(body.sector ?? "") as SectorId;

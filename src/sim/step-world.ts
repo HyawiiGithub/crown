@@ -1,4 +1,5 @@
 import type { Country, Sanction, Treaty, War, World } from "../shared/types";
+import { equipmentBonus } from "./tech";
 import { pushEvent, spawnPolity } from "./bootstrap";
 import { frontOccupation } from "./occupation";
 import { LAND_BORDERS } from "../data/borders";
@@ -141,7 +142,7 @@ export function stepWars(world: World, rnd: Rng, dt: number): void {
       // Money per soldier matters as well as numbers, so the defence budget moves the front.
       const perSoldier = c.economy.fiscal.military / Math.max(1, c.military.activeDuty);
       const worldPc = world.globals.globalGdp / Math.max(1, world.globals.globalPopulation);
-      const equipment = clamp(Math.pow(perSoldier / Math.max(1e-6, worldPc * 4), 0.25), 0.55, 1.8);
+      const equipment = clamp(Math.pow(perSoldier / Math.max(1e-6, worldPc * 4), 0.25), 0.55, 1.8) * equipmentBonus(c);
       const own = c.military.activeDuty * (0.4 + Math.max(15, c.military.readiness) / 100) * (Math.max(15, c.military.morale) / 100) * equipment;
       // Friends overseas send aid and expeditions, not their whole army.
       strength[b] = own + allyPower * 0.3;

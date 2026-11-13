@@ -5,6 +5,7 @@ import { SECONDS_PER_YEAR, stepAnnualEconomy, stepEconomy } from "./step-economy
 import { stepPolitics } from "./step-politics";
 import { stepCollapse } from "./collapse";
 import { stepFoundings } from "./firms";
+import { stepResearch } from "./tech";
 import { stepDiplomacy, stepWars } from "./step-world";
 import { stepScripted } from "./scripted";
 import { applyDirectives } from "./rules";
@@ -80,6 +81,7 @@ export class SimEngine {
         stepPolitics(w, this.rng);
         stepCollapse(w, this.rng);
         stepFoundings(w, this.rng);
+        stepResearch(w);
         stepDiplomacy(w, this.rng, 7 * DAY);
         applyDirectives(w, 7 * DAY);
         recomputeGlobals(w);

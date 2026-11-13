@@ -886,6 +886,17 @@ function Military({ c, mine }: { c: Country; mine: boolean }) {
   return (
     <div className="stack">
       <div className="card">
+        <div className="row"><strong className="grow">Research</strong><span className="dim mono">{Math.round(c.tech?.points ?? 0)} pts</span></div>
+        {(["army", "logistics", "industry"] as const).map((f) => (
+          <div key={f} className="row" style={{ fontSize: 12, padding: "2px 0" }}>
+            <span className="grow" style={{ textTransform: "capitalize" }}>{f}</span>
+            <span className="mono">{c.tech?.[f] ?? 0}</span>
+            {mine && <button className={`btn btn--sm ${c.tech?.focus === f ? "btn--active" : ""}`} onClick={() => void act({ type: "set-research", focus: f })}>Focus</button>}
+          </div>
+        ))}
+        <div className="dim" style={{ fontSize: 11 }}>The science budget buys levels; equipment and productivity follow.</div>
+      </div>
+      <div className="card">
         <Stat label="Active duty" value={people(m.activeDuty)} />
         <Stat label="Reserves" value={people(m.reserves)} />
         <Stat label="Annual budget" value={`$${credits(c.economy.fiscal.military)}`} />
