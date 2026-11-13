@@ -576,6 +576,14 @@ function CompanyCard({ co, mine }: { co: Company; mine: boolean }) {
       <Stat label="Market value" value={`$${credits(co.valuation)}`} />
       {co.listed && <Stat label="Share price" value={money(co.sharePrice, 2)} />}
       <Stat label="P/E" value={(co.pe ?? 0).toFixed(1)} />
+      <div style={{ marginTop: 10 }}>
+        <div className="mono dim" style={{ fontSize: 10.5, letterSpacing: ".08em" }}>HISTORY</div>
+        <div className="spark-grid">
+          <Spark title="Share price" values={co.priceHistory ?? []} format={(v) => money(v, 2)} />
+          <Spark title="Revenue" values={co.revenueHistory ?? []} format={(v) => credits(v)} />
+          <Spark title="Market value" values={co.valuationHistory ?? []} format={(v) => credits(v)} />
+        </div>
+      </div>
       <Stat label="1-year return" value={signedPct(co.sharePrice / Math.max(0.01, co.sharePriceYearAgo) - 1, 0)} />
       <Stat label="Share of home market" value={pct0(co.marketShare ?? 0)} />
       <Stat label="State owned" value={pct0(co.stateOwnership)} />

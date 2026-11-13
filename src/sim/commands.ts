@@ -9,7 +9,7 @@ import { foundCompany } from "./firms";
 import { techOf } from "./tech";
 import { SECTORS } from "../data/economy";
 import { annex, createPuppetState, declareWar, imposeSanction, liftSanction, signTreaty, transferLand, vassalise } from "./step-world";
-import { frontOccupation, peaceAccepted, peaceCost, peaceStanding, type PeaceTerms } from "./occupation";
+import { aimSatisfaction, frontOccupation, peaceAccepted, peaceCost, peaceStanding, type PeaceTerms } from "./occupation";
 
 /**
  * Everything the player can do. The sim is the single authority: the UI only
@@ -313,8 +313,9 @@ export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Reco
         reparations: clamp(Number(body.reparations ?? 0), -0.3, 0.3),
       };
       if (Boolean(body.annexWhole) && !terms.annexWhole) return { ok: false, message: "You need to hold at least 80% of a country to annex all of it." };
-      if (!peaceAccepted(terms, standing)) {
-        return { ok: false, message: `${foe?.name ?? war.rebels?.[enemy]?.name ?? "The enemy"} refuses. These terms ask for ${peaceCost(terms, standing).toFixed(0)} and your position only supports ${standing.leverage.toFixed(0)}.` };
+      const aimValue = aimSatisfaction(terms, war.aims, enemy);
+      if (!peaceAccepted(terms, standing, war.aims, enemy)) {
+        return { ok: false, message: `${foe?.name ?? war.rebels?.[enemy]?.name ?? "The enemy"} refuses. These terms ask for ${(peaceCost(terms, standing) - aimValue).toFixed(0)} and your position only supports ${standing.leverage.toFixed(0)}.` };
       }
 
       const results: string[] = [];

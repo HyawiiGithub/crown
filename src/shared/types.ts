@@ -1068,6 +1068,10 @@ export interface Company {
   marketShare?: number;
   /** Price / earnings multiple. */
   pe?: number;
+  /** Yearly share prices, revenue and market value, oldest first. */
+  priceHistory?: number[];
+  revenueHistory?: number[];
+  valuationHistory?: number[];
   /** Shares owned by the player's state fund. */
   playerShares?: number;
   id: EntityId;

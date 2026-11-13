@@ -151,7 +151,18 @@ export function stepWars(world: World, rnd: Rng, dt: number): void {
     }
 
     for (const front of war.fronts) {
-      const sides = front.belligerents.map((b) => strength[b] ?? 0);
+      // Armour breaks infantry, artillery breaks armour, infantry closes on artillery.
+      const mixOf = (id: string) => world.countries[id]?.military.divisions ?? { infantry: 0.6, armour: 0.2, artillery: 0.2 };
+      const arsenal = (mine: { infantry: number; armour: number; artillery: number }, foe: { infantry: number; armour: number; artillery: number }) => {
+        const arm = mine.armour * (foe.infantry + 0.5 * foe.artillery) - foe.armour * (mine.infantry + 0.5 * mine.artillery);
+        const art = mine.artillery * (foe.armour + 0.5 * foe.infantry) - foe.artillery * (mine.armour + 0.5 * mine.infantry);
+        const inf = mine.infantry * (foe.artillery + 0.5 * foe.armour) - foe.infantry * (mine.artillery + 0.5 * mine.armour);
+        const close = front.terrain === "urban" || front.terrain === "forest" || front.terrain === "mountain";
+        return clamp(1 + (close ? 0.4 : 0.6) * arm + 0.45 * art + (close ? 0.6 : 0.4) * inf, 0.7, 1.3);
+      };
+      const ma = mixOf(front.belligerents[0]);
+      const mb = mixOf(front.belligerents[1]);
+      const sides = [(strength[front.belligerents[0]] ?? 0) * arsenal(ma, mb), (strength[front.belligerents[1]] ?? 0) * arsenal(mb, ma)];
       const totalStrength = sides.reduce((a, b) => a + b, 0);
       if (totalStrength <= 0) {
         front.control = approach(front.control, 0, 0.01);

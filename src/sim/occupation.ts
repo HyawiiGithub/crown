@@ -101,6 +101,22 @@ export interface PeaceTerms {
 }
 
 /** What the terms ask of the enemy, on the same scale as leverage. */
+
+/** What the other side would give up to get the peace it said it wanted. */
+export type WarAim = NonNullable<War["aims"]>[number];
+
+export function aimSatisfaction(terms: PeaceTerms, aims: WarAim[] | undefined, ai: string): number {
+  if (!aims?.length) return 0;
+  let value = 0;
+  for (const aim of aims) {
+    if (aim.holder !== ai) continue;
+    if (aim.kind === "reparations" && (terms.reparations ?? 0) < -0.001) value += Math.min(30, Math.abs(terms.reparations ?? 0) * 220);
+    if (aim.kind === "land" && (terms.annexWhole || terms.annexOccupied || (terms.drawnShare ?? 0) > 0.001 || terms.cede)) value += 26;
+    if (aim.kind === "vassal" && terms.annexWhole) value += 18;
+  }
+  return value;
+}
+
 export function peaceCost(terms: PeaceTerms, standing: PeaceStanding): number {
   let cost = 0;
   if (terms.annexWhole) cost += 100;
@@ -113,6 +129,7 @@ export function peaceCost(terms: PeaceTerms, standing: PeaceStanding): number {
   return cost;
 }
 
-export function peaceAccepted(terms: PeaceTerms, standing: PeaceStanding): boolean {
-  return peaceCost(terms, standing) <= standing.leverage + 3;
+export function peaceAccepted(terms: PeaceTerms, standing: PeaceStanding, aims?: WarAim[], ai?: string): boolean {
+  const discount = ai ? aimSatisfaction(terms, aims, ai) : 0;
+  return peaceCost(terms, standing) - discount <= standing.leverage + 3;
 }

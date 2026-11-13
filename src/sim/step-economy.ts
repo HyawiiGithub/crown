@@ -807,7 +807,13 @@ function stepRisk(world: World, rnd: Rng): void {
 /** Once a simulated year: reset 1-year baselines and let AI governments adjust. */
 export function stepAnnualEconomy(world: World): void {
   for (const ex of world.markets.exchanges) ex.indexYearAgo = ex.index;
-  for (const co of Object.values(world.companies)) co.sharePriceYearAgo = co.sharePrice;
+  for (const co of Object.values(world.companies)) {
+    co.sharePriceYearAgo = co.sharePrice;
+    const keep = <T,>(ring: T[] | undefined, next: T): T[] => [...(ring ?? []), next].slice(-40);
+    co.priceHistory = keep(co.priceHistory, co.sharePrice);
+    co.revenueHistory = keep(co.revenueHistory, co.revenue);
+    co.valuationHistory = keep(co.valuationHistory, co.valuation);
+  }
   for (const c of Object.values(world.countries)) {
     if (c.annexedBy || c.id === world.playerCountry) continue;
     stepAiFiscal(c, world.startDate.year + world.t / SECONDS_PER_YEAR);
