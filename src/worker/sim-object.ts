@@ -649,7 +649,7 @@ export class SimObject {
             name: String(body.name ?? ""),
             country: String(body.country ?? ""),
             partyId: body.partyId ? String(body.partyId) : undefined,
-          });
+          }, this.rng!);
           return { ok: out.ok, message: out.message, data: out.character ? { characterId: out.character.id } : undefined };
         }
         case "join-party": {
@@ -657,7 +657,7 @@ export class SimObject {
           return { ok: out.ok, message: out.message };
         }
         case "found-party": {
-          const out = foundParty(w, String(body.userId ?? ""), String(body.name ?? ""), String(body.abbreviation ?? ""));
+          const out = foundParty(w, String(body.userId ?? ""), String(body.name ?? ""), String(body.abbreviation ?? ""), this.rng!);
           return { ok: out.ok, message: out.message };
         }
         case "run-for-office": {
@@ -670,13 +670,13 @@ export class SimObject {
             office,
             chamberId: body.chamberId ? String(body.chamberId) : undefined,
             partyId: body.partyId ? String(body.partyId) : undefined,
-          });
+          }, this.rng!);
           return { ok: out.ok, message: out.message, data: out.electionId ? { electionId: out.electionId } : undefined };
         }
         case "campaign": {
           const kind = String(body.kind ?? "rally") as CampaignKind;
           if (!["rally", "ads", "ground", "debate"].includes(kind)) return { ok: false, message: "Unknown campaign activity" };
-          const out = campaign(w, String(body.userId ?? ""), String(body.electionId ?? ""), kind);
+          const out = campaign(w, String(body.userId ?? ""), String(body.electionId ?? ""), kind, this.rng!);
           return { ok: out.ok, message: out.message, data: out.delta === undefined ? undefined : { delta: out.delta } };
         }
         case "appoint-minister":
