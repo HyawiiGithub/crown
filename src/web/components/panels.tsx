@@ -533,6 +533,10 @@ function Firms({ c, mine }: { c: Country; mine: boolean }) {
         <div className="card" style={{ display: "grid", gap: 6 }}>
           <strong style={{ fontSize: 12 }}>Sponsor a firm</strong>
           <div className="dim" style={{ fontSize: 11 }}>The treasury pays ${credits(cost)} for 51%, so the state can direct output. Free-market opinion will not like it.</div>
+          <div className="row row--wrap" style={{ gap: 4 }}>
+            <button className="btn btn--sm" onClick={() => void act({ type: "nationalise-all" })}>Nationalise all</button>
+            <button className="btn btn--sm" onClick={() => void act({ type: "privatise-all" })}>Privatise all</button>
+          </div>
           <div className="row" style={{ gap: 6 }}>
             <select className="input grow" value={sector} onChange={(e) => setSector(e.target.value as SectorId)}>
               {Object.entries(SECTORS).map(([id, x]) => <option key={id} value={id}>{x.label}</option>)}
@@ -1219,6 +1223,31 @@ export function CrisisBanner({ c, mine }: { c: Country; mine: boolean }) {
           <button className="btn btn--sm" onClick={() => void act({ type: "crisis-response", measure: "concede" })}>Let a republic go</button>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Major and catastrophic events, as cards that stay until dismissed. */
+export function EventPopup() {
+  const events = useStore((s) => s.events);
+  const [dismissed, setDismissed] = useState<Record<string, true>>({});
+  const queue = events
+    .filter((e) => (e.severity === "catastrophic" || e.severity === "major") && !dismissed[e.id])
+    .slice(-3)
+    .reverse();
+  if (!queue.length) return null;
+  return (
+    <div style={{ position: "fixed", top: 64, right: 16, zIndex: 25, display: "grid", gap: 8, width: "min(400px, 92vw)" }}>
+      {queue.map((e) => (
+        <div key={e.id} className="card" style={{ borderColor: e.severity === "catastrophic" ? "var(--negative)" : "#d08b2c", display: "grid", gap: 4 }}>
+          <div className="row" style={{ gap: 6 }}>
+            <Chip>{e.severity}</Chip>
+            <strong className="grow truncate" style={{ fontSize: 12 }}>{e.title}</strong>
+            <button className="btn btn--sm" onClick={() => setDismissed((d) => ({ ...d, [e.id]: true }))}>&times;</button>
+          </div>
+          <div className="dim" style={{ fontSize: 12 }}>{e.body}</div>
+        </div>
+      ))}
     </div>
   );
 }

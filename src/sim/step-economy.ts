@@ -1,6 +1,6 @@
 import type { Company, Country, MarketMood, SectorId, SectorState, World } from "../shared/types";
 import { SECTORS } from "../data/economy";
-import { indexCompanies } from "./firms";
+import { indexCompanies, SUPPLY } from "./firms";
 import { incomeShares, pushEvent, recomputeGlobals, taxCollected } from "./bootstrap";
 
 import { Rng, approach, clamp, clamp01 } from "./rng";
@@ -69,21 +69,26 @@ export function stepEconomy(world: World, rnd: Rng): void {
   const byCountry = indexCompanies(world);
   const valueAdded: Record<string, number> = {};
   const sectorOutput: Record<string, Map<SectorId, number>> = {};
+  const inputDemand: Record<string, Map<SectorId, number>> = {};
   for (const [id, list] of byCountry) {
     let va = 0;
     const bySector = new Map<SectorId, number>();
+    const byInput = new Map<SectorId, number>();
     for (const co of list) {
       if (co.insolvent || co.founded < 0) continue;
       va += co.revenue * 0.35;
       bySector.set(co.sector, (bySector.get(co.sector) ?? 0) + co.revenue);
+      // A firm pulls its inputs from upstream: the farm feeds the mill.
+      for (const link of SUPPLY[co.sector] ?? []) byInput.set(link.input, (byInput.get(link.input) ?? 0) + co.revenue * link.ratio);
     }
     valueAdded[id] = va;
     sectorOutput[id] = bySector;
+    inputDemand[id] = byInput;
   }
   for (const c of Object.values(world.countries)) {
     if (c.annexedBy) continue;
     stepMacro(world, c, rnd, anchorRate, anchorInflation, union, valueAdded[c.id] ?? 0);
-    stepSectors(world, c, sectorOutput[c.id]);
+    stepSectors(world, c, sectorOutput[c.id], inputDemand[c.id]);
     stepHouseholds(c);
   }
   stepCompanies(world, rnd);
@@ -500,7 +505,7 @@ function bankingCrisis(world: World, c: Country): void {
 // Sector markets
 // ===========================================================================
 
-function stepSectors(world: World, c: Country, firmOutput?: Map<import("../shared/types").SectorId, number>): void {
+function stepSectors(world: World, c: Country, firmOutput?: Map<SectorId, number>, firmInput?: Map<SectorId, number>): void {
   const e = c.economy;
   const m = e.macro;
   const dt = WEEK_YEARS;
@@ -525,7 +530,8 @@ function stepSectors(world: World, c: Country, firmOutput?: Map<import("../share
     if (s.id === "tourism") demandGrowth += (m.shock < -0.03 ? -0.4 : 0) + (c.wars.length ? -0.15 : 0);
     if (s.id === "construction" || s.id === "real-estate") demandGrowth += -(m.bondYield - m.expectedInflation - m.neutralRate - 0.012) * 1.2;
     if (s.id === "finance") demandGrowth += (m.credit / Math.max(0.05, creditTrend(world, c)) - 1) * 0.1;
-    const demand = s.quantity * Math.exp((demandGrowth * dt) - PRICE_ELASTICITY[s.id] * Math.log(Math.max(0.05, relPrice)) * 0.04 * dt);
+    const pull = clamp((firmInput?.get(s.id) ?? 0) / Math.max(1, s.output), 0, 0.6);
+    const demand = s.quantity * Math.exp((demandGrowth * dt) - PRICE_ELASTICITY[s.id] * Math.log(Math.max(0.05, relPrice)) * 0.04 * dt) * (1 + pull);
 
     // Supply: sector TFP plus capital chasing profitable markets.
     const tfp = (prof.growth * 0.4 + m.tfpGrowth * 0.4) * (0.5 + prof.techIntensity * 0.9) + (s.stateSubsidy * 0.05) - (s.regulation - 0.3) * 0.012 - s.stateOwnership * 0.004;
@@ -673,7 +679,14 @@ function stepCompanies(world: World, rnd: Rng): void {
     const worldGrowth = (world.globals.globalInflation + 0.025) * globalness;
     const research = (co.researchLevel - prof.techIntensity * 0.7) * 0.05;
     const sanctioned = sanctionLoad(world, c) * prof.sanctionExposure * 0.08;
-    const revenueGrowth = homeGrowth * (1 - globalness) + worldGrowth + research - sanctioned + rnd.normal() * 0.09 * Math.sqrt(dt) / dt * 0.05;
+    let starved = 0;
+    for (const link of SUPPLY[co.sector] ?? []) {
+      const up = e.sectors.find((x) => x.id === link.input);
+      if (!up) continue;
+      const tight = clamp((up.quantity / Math.max(1, up.capacity) - 0.95) / 0.05, 0, 1);
+      starved += tight * link.ratio;
+    }
+    const revenueGrowth = homeGrowth * (1 - globalness) + worldGrowth + research - sanctioned - starved * 1.5 + rnd.normal() * 0.09 * Math.sqrt(dt) / dt * 0.05;
     co.revenue = Math.max(1e4, co.revenue * Math.exp(clamp(revenueGrowth, -1, 2) * dt));
     co.marketShare = clamp(co.revenue / Math.max(1, s.output), 0, 1);
 

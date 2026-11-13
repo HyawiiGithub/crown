@@ -11,7 +11,42 @@ import { clamp01, type Rng } from "./rng";
  * firm too, paying for a stake and getting a say in what it produces.
  */
 
-const NAMES = ["Atlas", "Meridian", "Crescent", "Northfield", "Vanguard", "Kestrel", "Pioneer", "Sunrise", "Highland", "Riverton", "Bastion", "Larkfield", "Ostrava", "Cobalt", "Ellsworth"];
+/** What each industry buys from upstream, as a share of its revenue. */
+export const SUPPLY: Partial<Record<SectorId, { input: SectorId; ratio: number }[]>> = {
+  manufacturing: [{ input: "mining", ratio: 0.3 }, { input: "agriculture", ratio: 0.15 }],
+  construction: [{ input: "mining", ratio: 0.3 }],
+  energy: [{ input: "mining", ratio: 0.5 }],
+  utilities: [{ input: "energy", ratio: 0.3 }],
+  transport: [{ input: "energy", ratio: 0.25 }],
+  retail: [{ input: "manufacturing", ratio: 0.4 }, { input: "agriculture", ratio: 0.2 }],
+  technology: [{ input: "manufacturing", ratio: 0.25 }],
+  healthcare: [{ input: "manufacturing", ratio: 0.1 }],
+  media: [{ input: "manufacturing", ratio: 0.05 }],
+};
+
+const PREFIX: Record<string, string[]> = {
+  early: ["Bessemer", "Whitworth", "Arkwright", "Lowell", "Hanseatic", "Lombard", "Corn Exchange"],
+  victorian: ["North Western", "Imperial", "Consolidated", "Midland", "Clyde", "Victoria", "Union"],
+  interwar: ["Vulcan", "Atlas", "Reichs", "Societe Generale", "United", "Meridian", "Continental"],
+  postwar: ["National", "Federated", "General", "Associated", "Central", "Continental"],
+  modern: ["Atlas", "Meridian", "Crescent", "Northfield", "Vanguard", "Kestrel", "Pioneer", "Highland", "Riverton", "Bastion"],
+};
+
+const SUFFIX: Partial<Record<SectorId, string>> = {
+  mining: "Collieries", manufacturing: "Ironworks", retail: "Traders", transport: "Shipping",
+  finance: "Bank", energy: "Power", utilities: "Gas & Water", construction: "Builders",
+  agriculture: "Estates", technology: "Electric", media: "Press", defence: "Armaments",
+  healthcare: "Chemicals", tourism: "Hotels", telecom: "Telegraph", "real-estate": "Properties",
+  education: "Institute",
+};
+
+function eraOf(year: number): string {
+  if (year < 1860) return "early";
+  if (year < 1914) return "victorian";
+  if (year < 1945) return "interwar";
+  if (year < 1980) return "postwar";
+  return "modern";
+}
 
 /** Companies grouped by home country, so a weekly pass is O(firms), not O(firms x countries). */
 export function indexCompanies(world: World): Map<string, Company[]> {
@@ -34,7 +69,8 @@ export function foundCompany(
 ): Company | null {
   const c = world.countries[countryId];
   if (!c || !SECTORS[sector]) return null;
-  const base = opts.name ?? `${NAMES[Math.floor(rnd.float(0, NAMES.length)) % NAMES.length]} ${SECTORS[sector].label}`;
+  const pool = PREFIX[eraOf(world.startDate.year)] ?? PREFIX.modern;
+  const base = opts.name ?? `${pool[Math.floor(rnd.float(0, pool.length)) % pool.length]} ${SUFFIX[sector] ?? SECTORS[sector].label}`;
   let name = base;
   for (let n = 2; Object.values(world.companies).some((co) => co.name === name); n += 1) name = `${base} ${n}`;
   const co = materialiseCompany(

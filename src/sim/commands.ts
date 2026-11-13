@@ -423,6 +423,33 @@ export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Reco
       pushEvent(world, { kind: "economic", severity: "catastrophic", country: c.id, title: `${c.name} repudiates its debts`, body: `Bondholders lose ${(haircut * 100).toFixed(0)}%. International lending dries up.`, tags: ["crisis", "debt"] });
       return { ok: true, message: "You have defaulted." };
     }
+    case "nationalise-all":
+    case "privatise-all": {
+      const taking = type === "nationalise-all";
+      let count = 0;
+      let money = 0;
+      for (const co of Object.values(world.companies)) {
+        if (co.country !== c.id || co.insolvent) continue;
+        if (taking ? co.stateOwnership >= 0.99 : co.stateOwnership <= 0.01) continue;
+        if (taking) {
+          money += co.valuation * (1 - co.stateOwnership) * 0.6;
+          co.stateOwnership = 1;
+          co.listed = false;
+          for (const ex of world.markets.exchanges) ex.listings = ex.listings.filter((x) => x !== co.id);
+        } else {
+          money -= co.valuation * co.stateOwnership;
+          co.stateOwnership = 0;
+          const ex = world.markets.exchanges.find((x) => x.country === c.id);
+          if (ex) { co.exchangeId = ex.id; co.listed = true; if (!ex.listings.includes(co.id)) ex.listings.push(co.id); }
+        }
+        count += 1;
+      }
+      if (!count) return { ok: false, message: "There is nothing to change ownership of." };
+      c.economy.fiscal.debt = Math.max(0, c.economy.fiscal.debt + money);
+      c.economy.macro.businessConfidence = clamp(c.economy.macro.businessConfidence + (taking ? -4 : 4), 0, 100);
+      pushEvent(world, { kind: "corporate", severity: "major", country: c.id, title: `${c.name} ${taking ? "nationalises" : "privatises"} ${count} firms`, body: taking ? `Compensation of ${(money / 1e9).toFixed(1)}B is added to the debt.` : `The sales raise ${(-money / 1e9).toFixed(1)}B to pay down debt.`, tags: ["corporate"] });
+      return { ok: true, message: `${count} firms ${taking ? "nationalised" : "privatised"}.` };
+    }
     case "nationalise":
     case "privatise": {
       const co = world.companies[String(body.company)];
