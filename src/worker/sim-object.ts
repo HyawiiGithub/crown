@@ -23,6 +23,7 @@ import { introduceBill } from "../sim/step-politics";
 import {
   appointMinister,
   campaign,
+  characterForUserInCountry,
   createPolitician,
   foundParty,
   joinParty,
@@ -513,9 +514,26 @@ export class SimObject {
           const billId = String(body.billId ?? "");
           const bill = w.bills[billId];
           if (!bill) return { ok: false, message: "That bill no longer exists" };
-          if (bill.country !== body.country) return { ok: false, message: "That is another country's bill" };
-          bill.votes.push({ legislatorId: String(body.legislatorId ?? ""), partyId: String(body.partyId ?? ""), choice: body.choice as "aye" | "nay" });
-          return { ok: true, message: "Vote recorded" };
+          if (bill.status !== "introduced" && bill.status !== "in-committee") {
+            return { ok: false, message: "That bill is no longer open to votes" };
+          }
+          if (body.country !== undefined && String(body.country) !== bill.country) {
+            return { ok: false, message: "That is another country's bill" };
+          }
+          // The seat is the sender's character in the bill's country. A caller
+          // cannot name a seat: whatever legislatorId and partyId arrive are
+          // ignored, so one member cannot vote as another legislator or twice.
+          const voter = characterForUserInCountry(w, actor, bill.country);
+          if (!voter) return { ok: false, message: "You hold no seat in that country" };
+          const choice = String(body.choice ?? "");
+          if (choice !== "aye" && choice !== "nay" && choice !== "abstain" && choice !== "present") {
+            return { ok: false, message: "Vote aye, nay, abstain or present" };
+          }
+          if (bill.votes.some((v) => v.legislatorId === voter.id)) {
+            return { ok: false, message: `${voter.name} has already voted on this bill` };
+          }
+          bill.votes.push({ legislatorId: voter.id, partyId: voter.partyId ?? "", choice });
+          return { ok: true, message: `Vote recorded for ${voter.name}` };
         }
         case "introduce-bill": {
           const c = w.countries[String(body.country ?? "")];

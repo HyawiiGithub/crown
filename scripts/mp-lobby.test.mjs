@@ -306,6 +306,47 @@ async function main() {
   const afterBarrier = (await json(`/api/worlds/${PUBLIC_WORLD}/snapshot`)).body.world;
   check("the barrier landed on the actor's country, not a global one", Boolean(afterBarrier.countries.ESP.tradeBarriers?.GBR) && !afterBarrier.countries.BEL.tradeBarriers?.GBR, JSON.stringify(afterBarrier.countries.ESP.tradeBarriers ?? {}));
 
+  // --- a vote belongs to the sender's seat, and only once ---
+  const billRes = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: owner.cookie },
+    body: JSON.stringify({ type: "introduce-bill", country: "BEL", title: "Ballot Integrity Act", summary: "One seat, one vote.", body: "", category: "ordinary", sponsorId: "", sponsorPartyId: "" }),
+  });
+  check("a bill can be introduced in the member's country", billRes.body.ok === true, JSON.stringify(billRes.body));
+  const politician = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: owner.cookie },
+    body: JSON.stringify({ type: "create-politician", country: "BEL", name: "Ballot Tester" }),
+  });
+  const characterId = politician.body.data?.characterId;
+  check("the member has a character to vote with", typeof characterId === "string", JSON.stringify(politician.body));
+  const billWorld = (await json(`/api/worlds/${PUBLIC_WORLD}/snapshot`)).body.world;
+  const theBill = Object.values(billWorld.bills).find((b) => b.title === "Ballot Integrity Act" && b.country === "BEL");
+  check("the bill is on the order paper", Boolean(theBill), Object.keys(billWorld.bills).join(","));
+  const voteBody = { type: "vote", billId: theBill?.id, country: "BEL", choice: "aye", legislatorId: "someone-else", partyId: "fake-party" };
+  const cast = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: owner.cookie },
+    body: JSON.stringify(voteBody),
+  });
+  check("a member votes as themselves", cast.body.ok === true, JSON.stringify(cast.body));
+  const voted = (await json(`/api/worlds/${PUBLIC_WORLD}/snapshot`)).body.world.bills[theBill?.id]?.votes ?? [];
+  check("the vote is keyed to the sender's character, not the ids it sent", voted.length === 1 && voted[0].legislatorId === characterId && voted[0].partyId !== "fake-party", JSON.stringify(voted));
+  const again = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: owner.cookie },
+    body: JSON.stringify(voteBody),
+  });
+  check("the same seat cannot vote twice", again.body.ok === false && /already voted/.test(String(again.body.message)), JSON.stringify(again.body));
+  const stillOne = (await json(`/api/worlds/${PUBLIC_WORLD}/snapshot`)).body.world.bills[theBill?.id]?.votes ?? [];
+  check("the rejected repeat added no vote", stillOne.length === 1, JSON.stringify(stillOne.length));
+  const noSeat = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: players[1].cookie },
+    body: JSON.stringify({ type: "vote", billId: theBill?.id, country: "BEL", choice: "nay" }),
+  });
+  check("a member with no seat in that country cannot vote", noSeat.body.ok === false && /no seat/.test(String(noSeat.body.message)), JSON.stringify(noSeat.body));
+
   // --- naming another world must not reach it ---
   const beforePrivate = (await json(`/api/worlds/${PRIVATE_WORLD}/snapshot`)).body.world;
   const crossRead = await json(`/api/worlds/${PUBLIC_WORLD}/snapshot?worldId=${encodeURIComponent(PRIVATE_WORLD)}`);
