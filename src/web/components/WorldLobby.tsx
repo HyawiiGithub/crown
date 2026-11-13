@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, joinMultiplayer, previewScenario, useStore, type PolityPreview } from "../store";
 import { credits, GOVERNMENT_LABELS } from "../format";
 import { Empty } from "./primitives";
@@ -43,8 +43,11 @@ export function WorldLobby({ id, onBack }: { id: string; onBack: () => void }) {
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [countdown, setCountdown] = useState(60);
-  const [now, setNow] = useState(() => Date.now());
-  const entered = useRef(false);
+  // Read the clock at render time and let this tick force the render: a stale
+  // snapshot of Date.now() makes the countdown freeze when the tab is throttled.
+  const [, setTick] = useState(0);
+  const now = Date.now();
+  
 
   const load = useCallback(async () => {
     try {
@@ -64,7 +67,7 @@ export function WorldLobby({ id, onBack }: { id: string; onBack: () => void }) {
   }, [load]);
 
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 500);
+    const t = setInterval(() => setTick((n) => n + 1), 500);
     return () => clearInterval(t);
   }, []);
 
@@ -94,13 +97,19 @@ export function WorldLobby({ id, onBack }: { id: string; onBack: () => void }) {
   const remaining = world?.startsAt ? Math.max(0, Math.ceil((world.startsAt - now) / 1000)) : null;
   const live = Boolean(world?.startsAt && world.startsAt <= now);
 
-  // The countdown is the host's, but everybody enters on the same tick.
+  // The countdown is the host's, but everybody enters on the same tick. The
+  // attempt repeats until the world is adopted, so a dropped socket is not a
+  // dead end.
   useEffect(() => {
-    if (!world || !live || entered.current) return;
-    entered.current = true;
-    setBusy(true);
-    void joinMultiplayer(world.id).finally(() => setBusy(false));
-  }, [world?.id, live]);
+    if (!world || !live || s.worldId) return;
+    const attempt = () => {
+      setBusy(true);
+      void joinMultiplayer(world.id).finally(() => setBusy(false));
+    };
+    attempt();
+    const t = setInterval(attempt, 6000);
+    return () => clearInterval(t);
+  }, [world?.id, live, s.worldId]);
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();

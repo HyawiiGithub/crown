@@ -362,13 +362,37 @@ export function focusCountry(country: string | null): void {
   void call({ kind: "focus", country });
 }
 
-/** Send a player command to the simulation. The first argument is kept so dev tools can share a signature. */
+type ActionReply = { ok: boolean; message: string; data?: unknown };
+
+/**
+ * Send an action to the world being played.
+ *
+ * In a hosted world an action belongs to the member's seat, so it goes to that
+ * world's Durable Object, which resolves the country from the roster; the local
+ * worker only ever runs singleplayer. The server's reply is authoritative and
+ * the socket streams the resulting state back.
+ */
+async function sendAction(body: Record<string, unknown>): Promise<ActionReply> {
+  const remote = useStore.getState().remoteWorld;
+  if (!remote) return call<ActionReply>({ kind: "command", body });
+  const res = await fetch(`/api/worlds/${encodeURIComponent(remote)}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  }).catch(() => null);
+  if (!res) return { ok: false, message: "Lost the connection to that world" };
+  const reply = (await res.json().catch(() => ({}))) as ActionReply & { error?: string };
+  if (!res.ok) return { ok: false, message: reply.error ?? `That action was refused (${res.status})` };
+  return { ok: Boolean(reply.ok), message: reply.message ?? (reply.ok ? "ok" : "That action was refused"), data: reply.data };
+}
+
+/** Send a player command to the world being played. The first argument is kept so dev tools can share a signature. */
 export async function playerAction(_worldId: string, body: Record<string, unknown>): Promise<{ ok: boolean; message: string; data?: unknown }> {
-  return call({ kind: "command", body });
+  return sendAction(body);
 }
 
 export async function act(body: Record<string, unknown>): Promise<{ ok: boolean; message: string; data?: unknown }> {
-  const r = await call<{ ok: boolean; message: string; data?: unknown }>({ kind: "command", body });
+  const r = await sendAction(body);
   useStore.getState().toast(r.message, r.ok ? "ok" : "err");
   return r;
 }
@@ -444,7 +468,11 @@ export async function joinMultiplayer(id: string, country?: string): Promise<voi
       const msg = JSON.parse(String(ev.data)) as { type?: string; world?: never } & Record<string, unknown>;
       if (msg.type === "snapshot" && msg.world) adoptWorld(msg.world);
       else if (msg.type === "patch") applyPatch(msg as never);
-    } catch { /* ignore malformed frames */ }
+    } catch (err) {
+      // A malformed frame is not worth crashing the socket, but a frame that
+      // fails to apply is a bug worth seeing.
+      console.warn("Could not apply a world frame", err);
+    }
   };
   socket.onclose = () => {
     remoteSocket = null;

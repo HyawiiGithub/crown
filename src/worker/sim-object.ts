@@ -209,6 +209,9 @@ export class SimObject {
     if (!gate) this.holdUntil = 0;
     else if (gate.starts_at) this.holdUntil = gate.starts_at > Date.now() ? Number(gate.starts_at) : 0;
     else this.holdUntil = gate.lobby ? Infinity : 0;
+    // Worlds are built paused. A host who started one has released it, so the
+    // gate is the authority even after the object is evicted and reloaded.
+    if (!this.holdUntil && gate?.starts_at) this.world.paused = false;
     if (!this.world.ticker.length) recomputeGlobals(this.world);
     this.ensureRunning();
   }

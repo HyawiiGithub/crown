@@ -558,6 +558,19 @@ async function main() {
     headers: { "content-type": "application/json", cookie: players[1].cookie },
     body: JSON.stringify({ type: "found-company", name: "Test Co" }),
   });
+  const panelRate = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: players[1].cookie },
+    body: JSON.stringify({ type: "set-target", value: 0.031 }),
+  });
+  const panelChoose = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: players[1].cookie },
+    body: JSON.stringify({ type: "choose-country", country: "BEL" }),
+  });
+  const seatRate = (await json(`/api/worlds/${PUBLIC_WORLD}/snapshot`, { headers: { cookie: players[1].cookie } })).body.world.countries;
+  check("a panel command is applied to the sender's seat", panelRate.body.ok === true && Math.abs(seatRate.ESP.economy.centralBank.target - 0.031) < 1e-9, `${JSON.stringify(panelRate.body)} target ${seatRate.ESP.economy.centralBank.target}`);
+  check("a seated member cannot choose another country per command", panelChoose.body.ok === false && /country you hold/.test(String(panelChoose.body.message)), JSON.stringify(panelChoose.body));
   check("a lever the role does not hold is refused", noCompany.status === 403 && /company.create/.test(JSON.stringify(noCompany.body)), `status ${noCompany.status} ${JSON.stringify(noCompany.body)}`);
   const unknown = await json(`/api/worlds/${PUBLIC_WORLD}/action`, {
     method: "POST",

@@ -325,7 +325,9 @@ export function parseUser(row: Record<string, unknown>): User {
     avatar: platform === "discord" && !rawAvatar.startsWith("http") ? discordAvatarUrl(platformId, rawAvatar || null) : rawAvatar,
     email: row.email ? String(row.email) : undefined,
     staffRole: String(row.staff_role ?? "player") as StaffRole,
-    capabilities: caps,
+    // The role is the floor: a developer keeps world.create even if the stored
+    // list predates the role or was written by hand.
+    capabilities: capabilitiesFor(String(row.staff_role ?? "player") as StaffRole, caps),
     playsCountry: row.plays_country ? String(row.plays_country) : undefined,
     playsCharacterId: row.plays_character_id ? String(row.plays_character_id) : undefined,
     playsCompanyId: row.plays_company_id ? String(row.plays_company_id) : undefined,

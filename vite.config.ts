@@ -9,7 +9,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": { target: API_TARGET, changeOrigin: true },
+      // WebSocket upgrades carry the world socket, so the dev proxy has to relay them.
+      "/api": { target: API_TARGET, changeOrigin: true, ws: true },
       "/cdn-cgi": { target: API_TARGET, changeOrigin: true },
     },
   },
