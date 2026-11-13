@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { TickerEntry } from "../../shared/types";
-import { call, joinMultiplayer, previewScenario, useStore, type PolityPreview } from "../store";
+import { api, call, can, previewScenario, useStore, type PolityPreview } from "../store";
+import { WorldLobby } from "./WorldLobby";
 import { applyTheme, themeFromScenario } from "../theme";
 import { ago, credits, GOVERNMENT_LABELS, simDate } from "../format";
 import { Chip, Empty } from "./primitives";
@@ -18,11 +19,13 @@ export function TickerList({ ticker, onPick }: { ticker: TickerEntry[]; onPick: 
   );
 }
 
-type OpenWorld = { id: string; name: string; scenario_id: string; members: number; max_players?: number; updated_at: number };
+type OpenWorld = { id: string; name: string; scenario_id: string; members: number; max_players?: number; updated_at: number; owner_id?: string | null; is_public?: number; starts_at?: number | null; lobby?: number };
 
 export function Lobby() {
   const s = useStore();
   const [setup, setSetup] = useState<string | null>(null);
+  const [entering, setEntering] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const [worlds, setWorlds] = useState<OpenWorld[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -50,6 +53,8 @@ export function Lobby() {
       await call({ kind: "leave" });
     }
   };
+
+  if (entering) return <WorldLobby id={entering} onBack={() => setEntering(null)} />;
 
   return (
     <div className="lobby">
@@ -88,15 +93,18 @@ export function Lobby() {
 
       {worlds.length > 0 && (
         <section style={{ maxWidth: 1500, margin: "0 auto", padding: "22px 34px 0", width: "100%" }}>
-          <h3 style={{ marginBottom: 10 }}>Open worlds</h3>
+          <div className="row" style={{ marginBottom: 10 }}>
+            <h3 className="grow">Open worlds</h3>
+            {can(s.user, "world.create") && <button className="btn btn--sm btn--primary" onClick={() => setCreating(true)}>Host a new world</button>}
+          </div>
           <div className="save-grid">
             {worlds.map((w) => (
               <article key={w.id} className="card save-card">
                 <div className="grow" style={{ minWidth: 0 }}>
                   <strong className="truncate" style={{ display: "block" }}>{w.name}</strong>
-                  <div className="dim mono truncate" style={{ fontSize: 11 }}>{w.scenario_id} · {w.members}/{w.max_players ?? 8} {w.members === 1 ? "player" : "players"}</div>
+                  <div className="dim mono truncate" style={{ fontSize: 11 }}>{w.scenario_id} · {w.members}/{w.max_players ?? 8} {w.members === 1 ? "player" : "players"}{w.starts_at ? "" : " · in lobby"}</div>
                 </div>
-                <button className="btn btn--sm btn--primary" onClick={() => void joinMultiplayer(w.id, s.user?.playsCountry ?? undefined)}>Join</button>
+                <button className="btn btn--sm btn--primary" onClick={() => setEntering(w.id)}>Open lobby</button>
               </article>
             ))}
           </div>
@@ -125,6 +133,7 @@ export function Lobby() {
       </div>
 
       {setup && <NewGame scenarioId={setup} onClose={() => setSetup(null)} />}
+      {creating && <NewWorld onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); setEntering(id); }} />}
     </div>
   );
 }
@@ -191,6 +200,54 @@ function NewGame({ scenarioId, onClose }: { scenarioId: string; onClose: () => v
         <div className="row" style={{ gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
           {chosen && <span className="dim grow" style={{ fontSize: 12 }}>You will lead {chosen.name} from {simDate(scenario.startDate, 0)}.</span>}
           <button className="btn btn--primary" disabled={!chosen || busy} onClick={() => void begin()}>{busy ? "Building the world..." : "Begin"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The host's setup form: pick a scenario, a name and how many members may join. */
+function NewWorld({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
+  const s = useStore();
+  const [scenarioId, setScenarioId] = useState(s.bootstrap.scenarios[s.bootstrap.scenarios.length - 1].id);
+  const [name, setName] = useState("");
+  const [maxPlayers, setMaxPlayers] = useState(8);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const create = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api<{ ok: boolean; id: string }>("/api/worlds", {
+        method: "POST",
+        body: JSON.stringify({ scenarioId, name: name.trim() || undefined, maxPlayers }),
+      });
+      onCreated(r.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create that world");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="modal" onClick={onClose}>
+      <div className="card modal__body" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Host a new world" style={{ maxWidth: 460 }}>
+        <div className="row"><h3 className="grow" style={{ fontSize: 20 }}>Host a world</h3><button className="btn btn--sm" onClick={onClose}>Close</button></div>
+        <p className="dim" style={{ fontSize: 13, margin: "6px 0 14px" }}>The world is created with its clock held. Invite players, let them pick a nation, then start the countdown.</p>
+        <label className="dim" style={{ fontSize: 12 }}>Scenario</label>
+        <select className="input" value={scenarioId} onChange={(e) => setScenarioId(e.target.value)}>
+          {s.bootstrap.scenarios.map((sc) => (
+            <option key={sc.id} value={sc.id}>{sc.year}: {sc.name}</option>
+          ))}
+        </select>
+        <label className="dim" style={{ fontSize: 12, marginTop: 10, display: "block" }}>Name</label>
+        <input className="input" placeholder="Leave blank for a dated name" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />
+        <label className="dim" style={{ fontSize: 12, marginTop: 10, display: "block" }}>Members allowed</label>
+        <input className="input" type="number" min={2} max={64} value={maxPlayers} onChange={(e) => setMaxPlayers(Math.max(2, Math.min(64, Number(e.target.value) || 8)))} />
+        {error && <p style={{ color: "var(--negative)", fontSize: 12, marginTop: 10 }}>{error}</p>}
+        <div className="row" style={{ justifyContent: "flex-end", marginTop: 14 }}>
+          <button className="btn btn--primary" disabled={busy} onClick={() => void create()}>{busy ? "Creating..." : "Create lobby"}</button>
         </div>
       </div>
     </div>

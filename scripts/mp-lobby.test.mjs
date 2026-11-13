@@ -9,19 +9,26 @@
  * sign-up route, then drives join / roster / socket / action and every guard.
  */
 import { spawn, execSync } from "node:child_process";
-import { rmSync, mkdirSync, existsSync } from "node:fs";
+import { rmSync, mkdirSync, existsSync, appendFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { createHash } from "node:crypto";
 
 const PORT = Number(process.env.MP_PORT ?? 8791);
 const BASE = `http://127.0.0.1:${PORT}`;
 // Unique per run, so a dev process left by an interrupted run cannot lock it.
-const STATE = process.env.MP_STATE ?? `.cache/mp-test-state-${Date.now()}`;
+// Outside the project: wrangler dev watches the tree and rebuilding while the
+// test writes SQLite into it kills the worker mid-run.
+const STATE = process.env.MP_STATE ?? join(tmpdir(), `crown-mp-state-${Date.now()}`);
 const PUBLIC_WORLD = "1900:mp-public";
 const PRIVATE_WORLD = "1900:mp-private";
 const FULL_WORLD = "1900:mp-full";
 const SMALL_WORLD = "1900:mp-small";
 const WIDE_WORLD = "1900:mp-wide";
 const PASSWORD = "correct-horse-battery";
+// Set MP_DEV_LOG to keep the worker console for a run that dies mid-way.
+const DEBUG_LOG = process.env.MP_DEV_LOG ?? null;
 const isWin = process.platform === "win32";
 
 let failures = 0;
@@ -56,10 +63,16 @@ async function startDev() {
       stdio: ["ignore", "pipe", "pipe"],
     });
     let log = "";
-    dev.stdout.on("data", (b) => { log += String(b); });
-    dev.stderr.on("data", (b) => { log += String(b); });
+    dev.stdout.on("data", (b) => { log += String(b); if (DEBUG_LOG) appendFileSync(DEBUG_LOG, String(b)); });
+    dev.stderr.on("data", (b) => { log += String(b); if (DEBUG_LOG) appendFileSync(DEBUG_LOG, String(b)); });
     let dead = false;
-    dev.on("exit", () => { dead = true; });
+    dev.on("exit", (code) => {
+      // Keep the tail visible: a worker that dies mid-run otherwise looks like a
+      // bare network failure.
+      if (!dead) console.error(`dev exited (${code})
+${log.slice(-1500)}`);
+      dead = true;
+    });
     for (let i = 0; i < 60 && !dead; i += 1) {
       try {
         const r = await fetch(`${BASE}/api/health`);
@@ -91,7 +104,13 @@ async function register(name, ip) {
 }
 
 const json = async (path, opts = {}) => {
-  const res = await fetch(`${BASE}${path}`, opts);
+  let res;
+  try {
+    res = await fetch(`${BASE}${path}`, opts);
+  } catch (e) {
+    const alive = await fetch(`${BASE}/api/health`).then((r) => `alive ${r.status}`).catch((x) => `dead ${x?.cause?.code ?? x?.message}`);
+    throw new Error(`fetch ${path} failed (${e?.cause?.code ?? e?.message}); worker ${alive}`);
+  }
   return { status: res.status, body: await res.json().catch(() => ({})) };
 };
 
@@ -125,6 +144,15 @@ async function main() {
   for (const [id, isPublic, cap] of [[PUBLIC_WORLD, 1, 8], [PRIVATE_WORLD, 0, 8], [FULL_WORLD, 1, 8], [SMALL_WORLD, 1, 2], [WIDE_WORLD, 1, 8]]) {
     d1(`INSERT INTO worlds (id, name, scenario_id, owner_id, created_at, updated_at, is_public, archived, description, max_players) VALUES ('${id}', '${id}', '1900', NULL, ${now}, ${now}, ${isPublic}, 0, '', ${cap})`);
   }
+  // A host with world.create and no staff role, so the lobby's host checks are
+  // proved on ownership alone. The session is seeded because this account never
+  // signs up through the form, and it is written before the worker starts: a
+  // write behind a running worker's back resets the next request.
+  const HOST_TOKEN = "mp-lobby-host-token";
+  const HOST_ID = "u-mp-host";
+  const HOST_COOKIE = `crown_session=${HOST_TOKEN}`;
+  d1(`INSERT INTO users (id, platform, platform_id, username, staff_role, capabilities_json, created_at, last_seen_at) VALUES ('${HOST_ID}', 'test', 'mp-host', 'mp_host', 'player', '["world.create"]', ${now}, ${now})`);
+  d1(`INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES ('${createHash("sha256").update(HOST_TOKEN).digest("base64url")}', '${HOST_ID}', ${now}, ${now + 3600000})`);
   await startDev();
   console.log("worker ready on", BASE);
 
@@ -552,6 +580,40 @@ async function main() {
   check("the other world is not mutated by the attempt", beforePrivate.version === afterPrivate.version && beforePrivate.events.length === afterPrivate.events.length, `${beforePrivate.version}/${beforePrivate.events.length} -> ${afterPrivate.version}/${afterPrivate.events.length}`);
   check("the named world was never loaded under the addressed one", Boolean(afterPrivate.countries && Object.keys(afterPrivate.countries).length > 50));
   ws.close();
+  // --- the lobby: a host opens a world, members claim nations, a countdown holds the clock ---
+  const created = await json("/api/worlds", {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: HOST_COOKIE },
+    body: JSON.stringify({ scenarioId: "1900", name: "Lobby Test", maxPlayers: 6 }),
+  });
+  check("a developer with world.create opens a lobby", created.body.ok === true && typeof created.body.id === "string", JSON.stringify(created.body));
+  const LOBBY_WORLD = String(created.body.id ?? "");
+  const lobby = await json(`/api/worlds/${LOBBY_WORLD}/lobby`, { headers: { cookie: HOST_COOKIE } });
+  check("the lobby names its host and its members", lobby.body.you?.host === true && lobby.body.world?.members?.some((m) => m.userId === HOST_ID), JSON.stringify(lobby.body.world?.members ?? null));
+  check("a new lobby holds the clock with no start time", lobby.body.world?.startsAt === null && lobby.body.world?.lobby === true, JSON.stringify({ startsAt: lobby.body.world?.startsAt, lobby: lobby.body.world?.lobby }));
+  const guestLobby = await json(`/api/worlds/${LOBBY_WORLD}/lobby`, { headers: { cookie: players[3].cookie } });
+  check("another member can read a public lobby but is not its host", guestLobby.body.you?.host === false && guestLobby.body.world?.id === LOBBY_WORLD, JSON.stringify(guestLobby.body.you));
+  const guestClaim = await json(`/api/worlds/${LOBBY_WORLD}/join`, { method: "POST", headers: { "content-type": "application/json", cookie: players[3].cookie }, body: JSON.stringify({ country: "FRA" }) });
+  const claimedLobby = await json(`/api/worlds/${LOBBY_WORLD}/lobby`, { headers: { cookie: players[3].cookie } });
+  check("a member picks their nation from the lobby", guestClaim.body.ok === true && claimedLobby.body.you?.country === "FRA", JSON.stringify(claimedLobby.body.you));
+  const refusedStart = await json(`/api/worlds/${LOBBY_WORLD}/start`, { method: "POST", headers: { "content-type": "application/json", cookie: players[3].cookie }, body: JSON.stringify({ countdownSeconds: 5 }) });
+  check("a member cannot start a world they do not host", refusedStart.status === 403, `${refusedStart.status} ${JSON.stringify(refusedStart.body)}`);
+  const lobbyClock = await json(`/api/worlds/${LOBBY_WORLD}/snapshot`, { headers: { cookie: HOST_COOKIE } });
+  await sleep(2600);
+  const lobbyClockAgain = await json(`/api/worlds/${LOBBY_WORLD}/snapshot`, { headers: { cookie: HOST_COOKIE } });
+  check("an unopened lobby holds the clock", lobbyClock.body.world?.t === lobbyClockAgain.body.world?.t, `${lobbyClock.body.world?.t} vs ${lobbyClockAgain.body.world?.t}`);
+  const started = await json(`/api/worlds/${LOBBY_WORLD}/start`, { method: "POST", headers: { "content-type": "application/json", cookie: HOST_COOKIE }, body: JSON.stringify({ countdownSeconds: 120 }) });
+  check("the host starts the world with a countdown", started.body.ok === true && started.body.startsAt > Date.now(), JSON.stringify(started.body));
+  const scheduled = await json(`/api/worlds/${LOBBY_WORLD}/lobby`, { headers: { cookie: players[3].cookie } });
+  check("every member sees the same start time", scheduled.body.world?.startsAt === started.body.startsAt, `${scheduled.body.world?.startsAt} vs ${started.body.startsAt}`);
+  const counting = await json(`/api/worlds/${LOBBY_WORLD}/snapshot`, { headers: { cookie: HOST_COOKIE } });
+  await sleep(2600);
+  const countingAgain = await json(`/api/worlds/${LOBBY_WORLD}/snapshot`, { headers: { cookie: HOST_COOKIE } });
+  check("the countdown holds the clock until it ends", counting.body.world?.t === countingAgain.body.world?.t, `${counting.body.world?.t} vs ${countingAgain.body.world?.t}`);
+  const startNow = await json(`/api/worlds/${LOBBY_WORLD}/start`, { method: "POST", headers: { "content-type": "application/json", cookie: HOST_COOKIE }, body: JSON.stringify({ countdownSeconds: 0 }) });
+  await sleep(4200);
+  const running = await json(`/api/worlds/${LOBBY_WORLD}/snapshot`, { headers: { cookie: HOST_COOKIE } });
+  check("starting now releases the clock", startNow.body.ok === true && running.body.world?.t > countingAgain.body.world?.t, `${countingAgain.body.world?.t} -> ${running.body.world?.t}`);
 }
 
 try {

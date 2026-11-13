@@ -110,6 +110,8 @@ export class SimObject {
     switch (url.pathname) {
       case "/init":
         return json(await this.init(url));
+      case "/start":
+        return json(await this.start(request));
       case "/snapshot":
         return json(await this.snapshot());
       case "/patch":
@@ -155,6 +157,12 @@ export class SimObject {
   private bootId: string | null = null;
 
   /**
+   * Epoch ms the clock resumes. 0 means running, Infinity means a lobby that no
+   * host has started yet. The tick loop reads it; nothing else advances time.
+   */
+  private holdUntil = 0;
+
+  /**
    * The world this object serves.
    *
    * The first request to name a world stamps it into durable storage; from then
@@ -190,6 +198,17 @@ export class SimObject {
     }
 
     this.engine = new SimEngine(this.world);
+    // A world created as a lobby holds its clock until its host starts it, and a
+    // countdown holds it until it runs out. Worlds from before the lobby existed
+    // (lobby = 0, no start time) keep running exactly as they did.
+    const gate = await this.env.DB
+      .prepare(`SELECT lobby, starts_at FROM worlds WHERE id = ?`)
+      .bind(id)
+      .first<{ lobby: number; starts_at: number | null }>()
+      .catch(() => null);
+    if (!gate) this.holdUntil = 0;
+    else if (gate.starts_at) this.holdUntil = gate.starts_at > Date.now() ? Number(gate.starts_at) : 0;
+    else this.holdUntil = gate.lobby ? Infinity : 0;
     if (!this.world.ticker.length) recomputeGlobals(this.world);
     this.ensureRunning();
   }
@@ -234,6 +253,13 @@ export class SimObject {
 
   private async doTick(): Promise<void> {
     if (!this.engine || !this.world) return;
+    // The lobby and its countdown hold the clock: no tick until it is released.
+    if (this.holdUntil && Date.now() < this.holdUntil) return;
+    if (this.holdUntil) {
+      this.holdUntil = 0;
+      this.world.paused = false;
+      pushEvent(this.world, { kind: "system", severity: "notice", title: `${this.world.name}: the clock starts`, body: "The host started the world.", tags: ["system", "start"] });
+    }
     try {
       this.engine.tick(TICK_MS / 1000);
       this.dirtySince = Date.now();
@@ -799,6 +825,16 @@ export class SimObject {
   // =========================================================================
   // Persistence
   // =========================================================================
+
+  /** Release the clock at a host's chosen moment. 0 means start now. */
+  private async start(request: Request): Promise<{ ok: boolean; startsAt: number }> {
+    await this.load(this.worldId());
+    const body = (await request.json().catch(() => ({}))) as { startsAt?: number };
+    const asked = Number(body.startsAt ?? 0);
+    this.holdUntil = Number.isFinite(asked) && asked > Date.now() ? asked : 0;
+    if (this.world && this.holdUntil === 0) this.world.paused = false;
+    return { ok: true, startsAt: this.holdUntil };
+  }
 
   private async checkpoint(): Promise<{ ok: boolean; bytes: number }> {
     if (!this.world || !this.rng) return { ok: false, bytes: 0 };

@@ -428,7 +428,7 @@ function countriesOfScenario(scenarioId: string): Set<string> | null {
 app.get("/api/worlds", async (c) => {
   const u = c.get("user");
   const rows = await c.env.DB.prepare(
-    `SELECT w.id, w.name, w.scenario_id, w.updated_at, w.created_at, w.is_public, w.owner_id,
+    `SELECT w.id, w.name, w.scenario_id, w.updated_at, w.created_at, w.is_public, w.owner_id, w.starts_at, w.lobby,
             w.max_players,
             (SELECT COUNT(*) FROM world_members m WHERE m.world_id = w.id) AS members,
             (SELECT COUNT(*) FROM worlds w2 WHERE w2.scenario_id = w.scenario_id AND w2.archived = 0) AS siblings
@@ -452,7 +452,8 @@ app.post("/api/worlds", async (c) => {
   await stub.fetch("https://do/init?worldId=" + encodeURIComponent(id) + "&name=" + encodeURIComponent(name));
 
   await c.env.DB.prepare(
-    `INSERT INTO worlds (id, name, scenario_id, owner_id, created_at, updated_at, is_public, description, max_players) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+    `INSERT INTO worlds (id, name, scenario_id, owner_id, created_at, updated_at, is_public, description, max_players, lobby) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, 1)
+       ON CONFLICT(id) DO UPDATE SET name = excluded.name, owner_id = excluded.owner_id, updated_at = excluded.updated_at, description = excluded.description, max_players = excluded.max_players, lobby = excluded.lobby`,
   ).bind(id, name, scenarioId, u.id, Date.now(), Date.now(), (body.description ?? "").slice(0, 500), maxPlayers).run();
   await c.env.DB.prepare(`INSERT OR REPLACE INTO world_members (world_id, user_id, joined_at) VALUES (?, ?, ?)`).bind(id, u.id, Date.now()).run();
   await audit(c.env, { userId: u.id, username: u.username, action: "world.create", target: id, after: { scenarioId, name, maxPlayers } });
@@ -516,6 +517,68 @@ app.post("/api/worlds/:id/join", async (c) => {
 
   await audit(c.env, { userId: u.id, username: u.username, action: "world.join", target: id, after: country ? { country } : undefined });
   return c.json({ ok: true, id, country: country || mine?.plays_country || null });
+});
+
+/**
+ * The lobby: who has joined, which nation each member holds, and the moment the
+ * host's countdown ends. Any signed-in player can read it, because a lobby's
+ * whole purpose is showing which seats are still open.
+ */
+app.get("/api/worlds/:id/lobby", async (c) => {
+  const u = me(c);
+  const id = c.req.param("id");
+  const row = await c.env.DB.prepare(
+    `SELECT id, name, scenario_id, owner_id, max_players, is_public, starts_at, lobby, archived, created_at FROM worlds WHERE id = ?`,
+  ).bind(id).first<{ id: string; name: string; scenario_id: string; owner_id: string | null; max_players: number; is_public: number; starts_at: number | null; lobby: number; archived: number; created_at: number }>();
+  if (!row || row.archived) return c.json({ error: "No such world" }, 404);
+  const members = await c.env.DB.prepare(
+    `SELECT m.user_id, m.plays_country, m.joined_at, u.username FROM world_members m LEFT JOIN users u ON u.id = m.user_id WHERE m.world_id = ? ORDER BY m.joined_at ASC LIMIT 32`,
+  ).bind(id).all<{ user_id: string; plays_country: string | null; joined_at: number; username: string | null }>();
+  const listed = members.results.map((r) => ({
+    userId: String(r.user_id),
+    username: String(r.username ?? "unknown"),
+    country: r.plays_country ? String(r.plays_country) : null,
+    joinedAt: Number(r.joined_at),
+  }));
+  const mine = listed.find((m) => m.userId === u.id);
+  const staff = isStaff(u.staffRole);
+  if (!row.is_public && !mine && !staff) return c.json({ error: "That world is closed" }, 403);
+  return c.json({
+    world: {
+      id: row.id,
+      name: row.name,
+      scenarioId: row.scenario_id,
+      ownerId: row.owner_id ? String(row.owner_id) : null,
+      maxPlayers: Math.max(2, Number(row.max_players) || DEFAULT_MAX_PLAYERS),
+      isPublic: Boolean(row.is_public),
+      startsAt: row.starts_at ?? null,
+      lobby: Boolean(row.lobby),
+      createdAt: Number(row.created_at ?? 0),
+      members: listed,
+    },
+    you: { id: u.id, country: mine?.country ?? null, host: row.owner_id === u.id || staff },
+  });
+});
+
+/**
+ * Start a lobby. The host names a countdown, the world records the moment it
+ * ends, and its clock is held until then, so every member starts governing at
+ * the same instant instead of whenever they happened to join.
+ */
+app.post("/api/worlds/:id/start", async (c) => {
+  const u = me(c);
+  const id = c.req.param("id");
+  const row = await c.env.DB.prepare(`SELECT id, owner_id, archived FROM worlds WHERE id = ?`).bind(id).first<{ id: string; owner_id: string | null; archived: number }>();
+  if (!row || row.archived) return c.json({ error: "No such world" }, 404);
+  if (row.owner_id !== u.id && !isStaff(u.staffRole)) return c.json({ error: "Only the host can start that world" }, 403);
+  const body = (await c.req.json().catch(() => ({}))) as { countdownSeconds?: number };
+  const asked = Math.round(Number(body.countdownSeconds ?? 60));
+  const seconds = Math.max(0, Math.min(3600, Number.isFinite(asked) ? asked : 60));
+  const startsAt = Date.now() + seconds * 1000;
+  await c.env.DB.prepare(`UPDATE worlds SET starts_at = ?, lobby = 0, updated_at = ? WHERE id = ?`).bind(startsAt, Date.now(), id).run();
+  await simStub(c, id).fetch(`https://do/start?worldId=${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify({ startsAt }) });
+  await audit(c.env, { userId: u.id, username: u.username, action: "world.start", target: id, after: { startsAt, seconds } });
+  return c.json({ ok: true, startsAt, countdownSeconds: seconds });
 });
 
 app.get("/api/worlds/:id/members", async (c) => {

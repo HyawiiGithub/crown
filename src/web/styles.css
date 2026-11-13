@@ -519,3 +519,13 @@ html, body { position: fixed; inset: 0; width: 100%; overflow: hidden; }
 .draw-banner { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: min(460px, 92%); display: flex; align-items: center; gap: 10px; font-size: 13px; z-index: 8; background: var(--bg-raised); }
 .app[data-drawing] .map { cursor: crosshair; }
 @media (max-width: 820px) { .app[data-drawing] .rail-left, .app[data-drawing] .rail-right { display: none !important; } }
+
+/* Hosted lobby: nation claiming, the member list and the start countdown. */
+.world-lobby { max-width: 1240px; margin: 0 auto; padding: 26px 28px 60px; width: 100%; }
+.world-lobby__bar { display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+.world-lobby__grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 14px; margin-top: 18px; }
+.world-lobby__panel { display: flex; flex-direction: column; gap: 10px; min-height: 340px; min-width: 0; }
+.world-lobby__clock { font-variant-numeric: tabular-nums; font-size: 28px; letter-spacing: .06em; color: var(--accent-2); }
+.world-lobby__row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--rule); }
+.world-lobby__row--taken { opacity: .5; cursor: not-allowed; }
+@media (max-width: 880px) { .world-lobby__grid { grid-template-columns: minmax(0, 1fr); } .world-lobby { padding: 16px; } }
