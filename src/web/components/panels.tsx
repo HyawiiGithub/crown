@@ -732,15 +732,79 @@ function InternalSituation({ c, mine }: { c: Country; mine: boolean }) {
   );
 }
 
+/**
+ * The house itself: who sits in it, what is before it, and every division it has
+ * held. A vote that is over does not disappear here — it takes its place in the
+ * record with the numbers attached.
+ */
+function LegislationLedger({ c }: { c: Country }) {
+  const bills = useStore((s) => s.bills);
+  const chamber = c.legislature?.chambers[0];
+  const all = Object.values(bills).filter((b) => b.country === c.id).sort((a, b) => b.introducedAt - a.introducedAt);
+  const pending = all.filter((b) => b.status === "introduced" || b.status === "in-committee");
+  const decided = all.filter((b) => b.status === "enacted" || b.status === "rejected" || b.status === "expired");
+  const seatTotal = chamber ? c.parties.reduce((a, p) => a + (p.seats[chamber.id] ?? 0), 0) : 0;
+  return (
+    <Panel title={chamber ? `${chamber.name} · ${seatTotal} seats` : "Legislation"}>
+      {chamber && (
+        <div className="seatbar" role="img" aria-label="Seats by party" style={{ marginBottom: 8 }}>
+          {c.parties
+            .filter((p) => (p.seats[chamber.id] ?? 0) > 0)
+            .sort((a, b) => a.ideology - b.ideology)
+            .map((p) => (
+              <span key={p.id} title={`${p.name}: ${p.seats[chamber.id]}`} style={{ flex: p.seats[chamber.id] ?? 0, background: p.color }} />
+            ))}
+        </div>
+      )}
+      <div className="eyebrow">Before the house</div>
+      {!pending.length && <div className="dim" style={{ fontSize: 12 }}>Nothing tabled.</div>}
+      {pending.map((b) => (
+        <div key={b.id} className="card" style={{ marginBottom: 6 }}>
+          <div className="row">
+            <strong className="grow truncate" style={{ fontSize: 12 }}>{b.title}</strong>
+            <Chip>{b.status === "in-committee" ? "in committee" : "tabled"}</Chip>
+          </div>
+          <div className="dim" style={{ fontSize: 11 }}>{b.summary}</div>
+        </div>
+      ))}
+      <div className="eyebrow" style={{ marginTop: 8 }}>Divisions</div>
+      {!decided.length && <div className="dim" style={{ fontSize: 12 }}>No divisions held yet.</div>}
+      {decided.slice(0, 10).map((b) => {
+        const tally = b.tallies[b.chamberId];
+        const aye = tally?.aye ?? 0;
+        const nay = tally?.nay ?? 0;
+        return (
+          <div key={b.id} className="card" style={{ marginBottom: 6 }}>
+            <div className="row">
+              <strong className="grow truncate" style={{ fontSize: 12 }}>{b.title}</strong>
+              <Chip tone={b.status === "enacted" ? "var(--positive)" : "var(--negative)"}>
+                {b.status === "enacted" ? "passed" : b.status === "rejected" ? "defeated" : "lapsed"}
+              </Chip>
+            </div>
+            {tally && (
+              <div className="mono dim" style={{ fontSize: 11 }}>
+                {aye} aye · {nay} no · {tally.abstain} abstained
+              </div>
+            )}
+            {tally && (
+              <div style={{ display: "flex", height: 4, marginTop: 3, background: "var(--line)" }}>
+                <span style={{ flex: Math.max(0.001, aye), background: "var(--positive)" }} />
+                <span style={{ flex: Math.max(0.001, nay), background: "var(--negative)" }} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </Panel>
+  );
+}
 function Politics({ c, mine }: { c: Country; mine: boolean }) {
   const characters = useStore((s) => s.characters);
-  const bills = useStore((s) => s.bills);
   const start = useStore((s) => s.scenario?.startDate);
   const ex = c.executive;
   const chamber = c.legislature?.chambers[0];
   const total = chamber ? c.parties.reduce((a, p) => a + (p.seats[chamber.id] ?? 0), 0) || 1 : 1;
   const govSeats = chamber ? c.parties.filter((p) => ex.coalition.includes(p.id)).reduce((a, p) => a + (p.seats[chamber.id] ?? 0), 0) : 0;
-  const countryBills = Object.values(bills).filter((b) => b.country === c.id).sort((a, b) => b.introducedAt - a.introducedAt).slice(0, 8);
   const banker = Object.values(characters).find((x) => x.country === c.id && x.role === "central-banker");
   const opposition = chamber
     ? [...c.parties].filter((p) => !ex.coalition.includes(p.id)).sort((a, b) => (b.seats[chamber.id] ?? 0) - (a.seats[chamber.id] ?? 0))[0]
@@ -803,26 +867,64 @@ function Politics({ c, mine }: { c: Country; mine: boolean }) {
         {!mine && ex.ministers.every((m) => !m.characterId) && !banker && <div className="dim" style={{ fontSize: 12 }}>No cabinet ministers on record for this government.</div>}
       </Panel>
 
-      {countryBills.length > 0 && (
-        <Panel title="Legislation">
-          {countryBills.map((b) => {
-            const tally = b.tallies[b.chamberId];
-            return (
-              <div key={b.id} className="card" style={{ marginBottom: 6 }}>
-                <div className="row"><strong className="grow truncate" style={{ fontSize: 12 }}>{b.title}</strong><Chip tone={b.status === "enacted" ? "var(--positive)" : b.status === "rejected" ? "var(--negative)" : undefined}>{b.status.replace(/-/g, " ")}</Chip></div>
-                <div className="dim" style={{ fontSize: 11 }}>{b.summary}</div>
-                {tally && <div className="mono dim" style={{ fontSize: 11 }}>{tally.aye} for, {tally.nay} against</div>}
-              </div>
-            );
-          })}
-        </Panel>
-      )}
+      <LegislationLedger c={c} />
 
       <InternalSituation c={c} mine={mine} />
     </div>
   );
 }
 
+/** The straits and canals the world's freight is forced through. */
+function Chokepoints({ c }: { c: Country }) {
+  const points = useStore((s) => s.chokepoints);
+  const countries = useStore((s) => s.countries);
+  if (!points.length) return null;
+  const ordered = [...points].sort((a, b) => b.share - a.share);
+  return (
+    <Panel title="Trade chokepoints">
+      {ordered.map((p) => {
+        const owner = countries[p.owner];
+        const tone = p.status === "closed" ? "var(--negative)" : p.status === "threatened" ? "var(--warning)" : "var(--positive)";
+        return (
+          <div key={p.id} className="card" style={{ marginBottom: 6 }}>
+            <div className="row">
+              <strong className="grow truncate" style={{ fontSize: 12 }}>{p.name}</strong>
+              <Chip tone={tone}>{p.status}</Chip>
+            </div>
+            <div className="dim" style={{ fontSize: 11 }}>
+              {p.water} · {Math.round(p.share * 100)}% of world trade · {p.note}
+            </div>
+            <div className="mono dim" style={{ fontSize: 11 }}>Held by {owner?.name ?? "no state"}</div>
+            {p.owner === c.id && (
+              <div className="row row--wrap" style={{ gap: 4, marginTop: 4 }}>
+                {p.status === "open" && (
+                  <button className="btn btn--sm" onClick={() => void act({ type: "threaten-chokepoint", id: p.id })}>
+                    Threaten to close
+                  </button>
+                )}
+                {p.status !== "closed" && (
+                  <button
+                    className="btn btn--sm btn--danger"
+                    onClick={() => {
+                      if (confirm(`Close the ${p.name}? The world prices it the same day.`)) void act({ type: "close-chokepoint", id: p.id });
+                    }}
+                  >
+                    Close it
+                  </button>
+                )}
+                {p.status !== "open" && (
+                  <button className="btn btn--sm" onClick={() => void act({ type: "reopen-chokepoint", id: p.id })}>
+                    Reopen
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </Panel>
+  );
+}
 function Foreign({ c, mine }: { c: Country; mine: boolean }) {
   const countries = useStore((s) => s.countries);
   const wars = useStore((s) => s.wars);
@@ -857,6 +959,7 @@ function Foreign({ c, mine }: { c: Country; mine: boolean }) {
       )}
       {mine && <div className="dim" style={{ fontSize: 11 }}>Select another country on the map and open this tab to deal with it.</div>}
 
+      <Chokepoints c={c} />
       <Panel title={`Wars (${myWars.length})`}>
         {!myWars.length && <div className="dim" style={{ fontSize: 12 }}>At peace.</div>}
         {myWars.map((w) => (

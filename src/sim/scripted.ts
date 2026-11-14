@@ -2,6 +2,7 @@ import type { World } from "../shared/types";
 import { pushEvent } from "./bootstrap";
 import { annex, declareWar, joinWar } from "./step-world";
 import { isPlayerCountry } from "./seats";
+import { FLAVOUR_SCRIPTS } from "./scripted-flavour";
 
 /**
  * History on rails, for events the scenario's whole premise rests on. Each fires
@@ -9,7 +10,7 @@ import { isPlayerCountry } from "./seats";
  * which case that decision belongs to the player.
  */
 
-interface Scripted {
+export interface Scripted {
   /** Days after the scenario start. */
   day: number;
   /** Polities whose agency this event would take away from a player. */
@@ -57,6 +58,11 @@ const SCRIPTS: Record<string, Scripted[]> = {
     },
   ],
 };
+
+// The long arcs live in their own chronicle and are merged in by scenario.
+for (const [scenario, list] of Object.entries(FLAVOUR_SCRIPTS)) {
+  SCRIPTS[scenario] = [...(SCRIPTS[scenario] ?? []), ...list];
+}
 
 const fired = new WeakMap<World, Set<string>>();
 

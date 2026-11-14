@@ -139,6 +139,8 @@ function stepBills(world: World, rnd: Rng): void {
     }
   }
 
+  aiBills(world, rnd);
+
   // Keep the bill archive bounded.
   const finished = Object.values(world.bills).filter((b) => b.status === "enacted" || b.status === "rejected" || b.status === "expired");
   if (finished.length > 120) {
@@ -384,5 +386,55 @@ export function stepPolitics(world: World, rnd: Rng): void {
     if (c.nextElectionAt !== undefined && world.t >= c.nextElectionAt && isDemocratic(c.government)) holdElection(world, c, rnd);
     if (c.nextPresidentialAt !== undefined && world.t >= c.nextPresidentialAt && isDemocratic(c.government)) holdPresidentialElection(world, c, rnd);
     stepUnrest(world, c, rnd);
+  }
+}
+
+/**
+ * Governments nobody is playing still govern.
+ *
+ * An AI cabinet periodically sends something to its own chamber: a budget that
+ * moves money to the departments its ideology cares about, a tax cut it cannot
+ * pay for, a procurement bill after a scare. The chamber then votes exactly as
+ * it would on a player's bill, so the ledger fills with other people's politics.
+ */
+const AI_BILLS: { title: string; summary: string; policy: PolicyPatch; opinion: number; lean: number }[] = [
+  { title: "Social insurance (indexation) act", summary: "Pensions and welfare are lifted and tied to prices.", policy: { budget: { welfare: 0.14, health: 0.09 } }, opinion: 60, lean: -1 },
+  { title: "Schools and hospitals appropriation", summary: "Recurrent spending on education and health is raised.", policy: { budget: { education: 0.08, health: 0.1 } }, opinion: 57, lean: -1 },
+  { title: "Research and skills act", summary: "Public money moves into science and training.", policy: { budget: { science: 0.03, education: 0.07 } }, opinion: 55, lean: 0 },
+  { title: "Income tax reduction act", summary: "The headline rate falls, financed by borrowing.", policy: { tax: { income: 0.2 } }, opinion: 56, lean: 1 },
+  { title: "Defence procurement act", summary: "A multi-year order for equipment and munitions.", policy: { budget: { defence: 0.06 } }, opinion: 47, lean: 1 },
+  { title: "Tariff schedule (amendment)", summary: "Selected imports face a protective duty.", policy: { tax: { tariff: 0.06 } }, opinion: 46, lean: 1 },
+];
+
+function aiBills(world: World, rnd: Rng): void {
+  for (const c of Object.values(world.countries)) {
+    if (c.annexedBy || !c.legislature || !c.parties.length) continue;
+    if (isPlayerCountry(world, c.id)) continue;
+    if (!rnd.chance(0.02)) continue;
+    const pending = Object.values(world.bills).filter((b) => b.country === c.id && (b.status === "introduced" || b.status === "in-committee")).length;
+    if (pending >= 2) continue;
+    const chamber = c.legislature.chambers[0];
+    if (!chamber) continue;
+    const sponsorId = c.executive.headOfGovernmentId;
+    const sponsorPartyId = c.executive.coalition[0] ?? c.parties[0]?.id;
+    if (!sponsorId || !sponsorPartyId) continue;
+    const lean = c.ideology < -8 ? -1 : c.ideology > 8 ? 1 : 0;
+    const pool = AI_BILLS.filter((b) => b.lean === lean);
+    const pick = (pool.length ? pool : AI_BILLS)[Math.floor(rnd.float(0, (pool.length ? pool : AI_BILLS).length - 0.001))];
+    introduceBill(world, c.id, {
+      title: pick.title,
+      summary: pick.summary,
+      body: "",
+      category: "money",
+      sponsorId,
+      sponsorPartyId,
+      chamberId: chamber.id,
+      passageChambers: [chamber.id],
+      effects: {},
+      cost: 0,
+      whipStrength: world.params.whipStrength,
+      publicOpinion: pick.opinion,
+      policy: pick.policy,
+    });
   }
 }

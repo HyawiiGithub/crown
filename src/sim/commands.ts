@@ -5,6 +5,7 @@ import { stabilisationPlan } from "./step-economy";
 import { clamp, clamp01, type Rng } from "./rng";
 import { applyPolicy, introduceBill, needsLegislature } from "./step-politics";
 import { answerCrisis } from "./collapse";
+import { chokepointById, setChokepoint } from "./chokepoints";
 import { techOf } from "./tech";
 import { annex, createPuppetState, declareWar, imposeSanction, liftSanction, signTreaty, transferLand, vassalise } from "./step-world";
 import { aimSatisfaction, frontOccupation, peaceAccepted, peaceCost, peaceStanding, type PeaceTerms } from "./occupation";
@@ -115,6 +116,42 @@ export function runCommand(world: World, engine: SimEngine, rng: Rng, body: Reco
   const c = governed ? world.countries[governed] : undefined;
   if (!c) return { ok: false, message: seat ? "Claim a country before giving orders." : "Choose a country to govern first." };
   if (c.annexedBy) return { ok: false, message: `${c.name} no longer exists.` };
+
+  // A strait is not a border: it is a toll booth, and holding it is leverage.
+  if (type === "close-chokepoint" || type === "threaten-chokepoint" || type === "reopen-chokepoint") {
+    const point = chokepointById(world, String(body.id ?? ""));
+    if (!point) return { ok: false, message: "No such chokepoint." };
+    if (point.owner !== c.id) {
+      const holder = world.countries[point.owner];
+      return {
+        ok: false,
+        message: holder
+          ? `The ${point.name} is held by ${holder.name}. Only its owner can move on it.`
+          : `No state holds the ${point.name} to close it.`,
+      };
+    }
+    const status = type === "close-chokepoint" ? "closed" : type === "threaten-chokepoint" ? "threatened" : "open";
+    if (point.status === status) {
+      return { ok: false, message: `The ${point.name} is already ${status === "open" ? "open" : status}.` };
+    }
+    const why =
+      type === "reopen-chokepoint"
+        ? `${c.name} reopens the lane it had shut.`
+        : type === "close-chokepoint"
+          ? `${c.name} orders the ${point.name} shut to all but its own shipping.`
+          : `${c.name} warns that it may shut the ${point.name}.`;
+    setChokepoint(world, point, status, c.id, why);
+    return {
+      ok: true,
+      message:
+        status === "closed"
+          ? `The ${point.name} is closed. ${Math.round(point.share * 100)}% of world trade has to go round.`
+          : status === "threatened"
+            ? `The ${point.name} is under threat. Insurers and freight markets are already pricing it.`
+            : `The ${point.name} is open again and shipping resumes.`,
+    };
+  }
+
   const e = c.economy;
 
   switch (type) {

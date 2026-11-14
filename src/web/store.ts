@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type {
   Bill,
   Character,
+  Chokepoint,
   Company,
   Country,
   MapRegion,
@@ -66,6 +67,7 @@ interface PatchPayload {
   wars?: War[];
   treaties?: Treaty[];
   sanctions?: Sanction[];
+  chokepoints?: Chokepoint[];
   events?: WorldEvent[];
   ticker?: TickerEntry[];
   control?: Record<string, string>;
@@ -96,6 +98,7 @@ interface Store {
   wars: War[];
   treaties: Treaty[];
   sanctions: Sanction[];
+  chokepoints: Chokepoint[];
   events: WorldEvent[];
   ticker: TickerEntry[];
   control: Record<string, string>;
@@ -153,6 +156,7 @@ const worldInitial = {
   wars: [] as War[],
   treaties: [] as Treaty[],
   sanctions: [] as Sanction[],
+  chokepoints: [],
   events: [] as WorldEvent[],
   ticker: [] as TickerEntry[],
   control: {} as Record<string, string>,
@@ -245,6 +249,7 @@ function adoptWorld(w: World): void {
     wars: Object.values(w.wars),
     treaties: Object.values(w.treaties).filter((t) => t.active),
     sanctions: Object.values(w.sanctions),
+    chokepoints: Object.values(w.chokepoints ?? {}),
     events: w.events.slice(-40),
     ticker: w.ticker.slice(0, 60),
     control: w.control,
@@ -288,6 +293,7 @@ function applyPatch(p: PatchPayload): void {
     wars: p.wars ?? cur.wars,
     treaties: p.treaties ?? cur.treaties,
     sanctions: p.sanctions ?? cur.sanctions,
+    chokepoints: p.chokepoints ?? cur.chokepoints,
     events: p.events ?? cur.events,
     ticker: p.ticker ?? cur.ticker,
     control: p.control ?? cur.control,

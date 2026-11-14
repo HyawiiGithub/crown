@@ -1533,6 +1533,24 @@ export interface CommodityMarket {
   inventory: number;
 }
 
+/** A canal or strait the world's trade must pass through, and who can shut it. */
+export interface Chokepoint {
+  id: string;
+  name: string;
+  /** The water it joins, for the panel. */
+  water: string;
+  /** ISO3 that can threaten or close it; empty when no state holds it. */
+  owner: string;
+  /** Share of world seaborne trade that passes through, 0..1. */
+  share: number;
+  /** What it is the only way through for. */
+  note: string;
+  status: "open" | "threatened" | "closed";
+  /** Sim time the status last changed. */
+  changedAt: SimSeconds;
+  /** Who last moved it. */
+  by?: string;
+}
 export interface World {
   /** Country the player governs in singleplayer. */
   playerCountry?: Iso3;
@@ -1571,6 +1589,8 @@ export interface World {
   wars: Record<EntityId, War>;
   treaties: Record<EntityId, Treaty>;
   sanctions: Record<EntityId, Sanction>;
+  /** The narrow water world trade is forced through. */
+  chokepoints?: Record<string, Chokepoint>;
   bills: Record<EntityId, Bill>;
   events: WorldEvent[];
   /** Rolling ticker. */

@@ -10,6 +10,8 @@ import { stepSupply } from "./supply";
 import { stepMobilisation } from "./mobilisation";
 import { stepDiplomacy, stepWars } from "./step-world";
 import { stepScripted } from "./scripted";
+import { stepFronts } from "./fronts";
+import { stepChokepoints } from "./chokepoints";
 import { applyDirectives } from "./rules";
 
 /**
@@ -77,11 +79,13 @@ export class SimEngine {
       w.t += DAY;
       w.dayCount++;
       stepWars(w, this.rng, DAY);
+      stepFronts(w, this.rng);
       stepScripted(w);
       if (w.dayCount % 7 === 0) {
         stepEconomy(w, this.rng);
         stepPolitics(w, this.rng);
         stepCollapse(w, this.rng);
+        stepChokepoints(w, this.rng);
         stepFoundings(w, this.rng);
         stepResearch(w);
         stepSupply(w);
