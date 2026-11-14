@@ -225,6 +225,7 @@ function DiscordMark() {
 const SPEEDS: { value: number; label: string; title: string }[] = [
   { value: 0.5, label: "0.5", title: "Half a day per second" },
   { value: 1, label: "1", title: "1 day per second" },
+  { value: 1.5, label: "1.5", title: "A day and a half per second" },
   { value: 3, label: "3", title: "3 days per second" },
   { value: 7, label: "7", title: "1 week per second" },
   { value: 30, label: "30", title: "1 month per second" },
@@ -317,7 +318,7 @@ function WorldShell() {
         <ConnectionDot />
         <span className="row time-controls" role="group" aria-label="Game speed">
           <button className={`btn btn--sm ${s.paused ? "btn--active" : ""}`} onClick={() => setClock({ paused: !s.paused })} title="Pause or resume (Space)">{s.paused ? "Play" : "Pause"}</button>
-          {(s.connection === "live" ? SPEEDS.filter((x) => x.value <= 1) : SPEEDS).map((x) => <button key={x.value} className={`btn btn--sm ${!s.paused && s.speed === x.value ? "btn--active" : ""}`} title={x.title} onClick={() => setClock({ speed: x.value, paused: false })}>{x.label}x</button>)}
+          {(s.connection === "live" ? SPEEDS.filter((x) => x.value <= 1.5) : SPEEDS).map((x) => <button key={x.value} className={`btn btn--sm ${!s.paused && s.speed === x.value ? "btn--active" : ""}`} title={x.title} onClick={() => setClock({ speed: x.value, paused: false })}>{x.label}x</button>)}
         </span>
         {globals && (
           <span className="row masthead__stats">
