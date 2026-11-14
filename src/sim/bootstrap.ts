@@ -22,6 +22,7 @@ import type {
   World,
 } from "../shared/types";
 import { SECTOR_IDS } from "../shared/types";
+import { ensureChokepoints } from "./chokepoints";
 import { COUNTRY_BY_ISO3, EXTRA_LANDS, GOVERNMENT_TITLES, NAMED_FEATURES, TERRITORY_OWNER, COUNTRIES, colourForCountry } from "../data/countries";
 import { ARCHETYPES, COMMODITY_BASE, EXCHANGES, SECTORS } from "../data/economy";
 import { companiesForYear } from "../data/companies";
@@ -882,6 +883,7 @@ export function buildWorld(scenario: Scenario, name: string, id: string, now: nu
     }
   }
 
+  ensureChokepoints(world);
   recomputeGlobals(world);
   pushEvent(world, { kind: "system", severity: "notice", title: `${scenario.name}: ${scenario.startDate.year}`, body: `${Object.keys(world.countries).length} polities and ${Object.keys(world.companies).length} corporations.`, tags: ["system"] });
   return world;

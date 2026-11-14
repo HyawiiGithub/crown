@@ -421,7 +421,7 @@ function aiBills(world: World, rnd: Rng): void {
     const lean = c.ideology < -8 ? -1 : c.ideology > 8 ? 1 : 0;
     const pool = AI_BILLS.filter((b) => b.lean === lean);
     const pick = (pool.length ? pool : AI_BILLS)[Math.floor(rnd.float(0, (pool.length ? pool : AI_BILLS).length - 0.001))];
-    introduceBill(world, c.id, {
+    const made = introduceBill(world, c.id, {
       title: pick.title,
       summary: pick.summary,
       body: "",
@@ -436,5 +436,11 @@ function aiBills(world: World, rnd: Rng): void {
       publicOpinion: pick.opinion,
       policy: pick.policy,
     });
+    // Every government in the world legislating is not the news the player
+    // needs: keep the wire for the states that matter and for their own house.
+    if (made && !isNotable(world, c) && !isPlayerCountry(world, c.id)) {
+      world.events.pop();
+      world.ticker.shift();
+    }
   }
 }

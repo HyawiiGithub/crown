@@ -34,6 +34,7 @@ import type { Capability, StaffRole } from "../shared/types";
 import { runDevOp } from "../sim/dev-ops";
 import { runCommand } from "../sim/commands";
 import { ACTION_CAPABILITIES, capabilitiesFor } from "./capabilities";
+import { ensureChokepoints } from "../sim/chokepoints";
 import { pushEvent, recomputeGlobals } from "../sim/bootstrap";
 import { Rng, clamp } from "../sim/rng";
 
@@ -332,6 +333,7 @@ export class SimObject {
 
   private async snapshot(): Promise<{ world: World; users: OnlineUser[]; chat: ChatMessage[] }> {
     await this.load(this.worldId());
+    if (this.world) ensureChokepoints(this.world);
     return { world: this.world!, users: this.onlineUsers(), chat: this.chat };
   }
 

@@ -27,9 +27,11 @@ const BILL_SETTLED = new Set(["enacted", "rejected", "expired"]);
 export function VoteTray() {
   const bills = useStore((s) => s.bills);
   const countries = useStore((s) => s.countries);
+  const mine = useStore((s) => s.playerCountry);
   const [hidden, setHidden] = useState<Record<string, true>>({});
   const [open, setOpen] = useState(() => typeof window === "undefined" || window.innerWidth > 1080);
-  const live = useMemo(() => Object.values(bills).filter((b) => !BILL_SETTLED.has(b.status) && !hidden[b.id]), [bills, hidden]);
+  // Other governments legislate too; the tray is for the house you sit in.
+  const live = useMemo(() => Object.values(bills).filter((b) => b.country === mine && !BILL_SETTLED.has(b.status) && !hidden[b.id]), [bills, hidden, mine]);
   if (!live.length) return null;
   return (
     <div style={{ position: "fixed", right: 16, bottom: 16, zIndex: 20, display: "grid", gap: 8, justifyItems: "end", maxWidth: "min(360px, 92vw)" }}>
@@ -745,15 +747,10 @@ function LegislationLedger({ c }: { c: Country }) {
   const decided = all.filter((b) => b.status === "enacted" || b.status === "rejected" || b.status === "expired");
   const seatTotal = chamber ? c.parties.reduce((a, p) => a + (p.seats[chamber.id] ?? 0), 0) : 0;
   return (
-    <Panel title={chamber ? `${chamber.name} · ${seatTotal} seats` : "Legislation"}>
+    <Panel title="The house">
       {chamber && (
-        <div className="seatbar" role="img" aria-label="Seats by party" style={{ marginBottom: 8 }}>
-          {c.parties
-            .filter((p) => (p.seats[chamber.id] ?? 0) > 0)
-            .sort((a, b) => a.ideology - b.ideology)
-            .map((p) => (
-              <span key={p.id} title={`${p.name}: ${p.seats[chamber.id]}`} style={{ flex: p.seats[chamber.id] ?? 0, background: p.color }} />
-            ))}
+        <div className="dim" style={{ fontSize: 11, marginBottom: 4 }}>
+          {chamber.name} · {seatTotal} seats
         </div>
       )}
       <div className="eyebrow">Before the house</div>

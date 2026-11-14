@@ -235,6 +235,12 @@ export const useStore = create<Store>((set, get) => ({
   },
 }));
 
+/** A member holds a country in a shared world through its seat map; solo play uses playerCountry. */
+function mySeat(w: World): string | null {
+  const me = useStore.getState().user?.id;
+  return mySeatHint ?? (me ? w.seats?.[me] : undefined) ?? w.playerCountry ?? null;
+}
+
 function adoptWorld(w: World): void {
   const scenario = useStore.getState().bootstrap.scenarios.find((s) => s.id === w.scenarioId) ?? null;
   useStore.setState({
@@ -259,8 +265,8 @@ function adoptWorld(w: World): void {
     paused: w.paused,
     speed: w.speed,
     globals: w.globals,
-    playerCountry: w.playerCountry ?? null,
-    selected: w.playerCountry ?? null,
+    playerCountry: mySeat(w),
+    selected: mySeat(w),
     params: w.params as unknown as Record<string, number>,
     directives: w.directives,
     // A new world must not inherit an operation aimed at the last one.
@@ -446,6 +452,9 @@ export function isStaffUser(u: User | null): boolean {
 let remoteSocket: WebSocket | null = null;
 
 /** Join a world's roster and attach to its live stream. */
+/** What /join said this browser holds; the sim payload does not carry seats. */
+let mySeatHint: string | null = null;
+
 export async function joinMultiplayer(id: string, country?: string): Promise<void> {
   const store = useStore.getState();
   store.set({ connection: "connecting" });
@@ -460,6 +469,9 @@ export async function joinMultiplayer(id: string, country?: string): Promise<voi
     store.toast(joined.status === 401 ? "Sign in to join a world" : why.error ?? "Could not join that world", "err");
     return;
   }
+  const info = (await joined.json().catch(() => ({}))) as { country?: string | null };
+  mySeatHint = info.country ?? null;
+  if (mySeatHint) useStore.setState({ playerCountry: mySeatHint, selected: mySeatHint });
   const { url } = (await fetch(`/api/worlds/${encodeURIComponent(id)}/socket-url`).then((r) => r.json())) as { url: string };
   remoteSocket?.close();
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";

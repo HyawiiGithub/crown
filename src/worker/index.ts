@@ -641,7 +641,17 @@ app.get("/api/worlds/:id/snapshot", async (c) => {
   if (named && named !== id) return c.json({ error: "World mismatch" }, 400);
   const stub = simStub(c, id);
   const res = await stub.fetch(`https://do/snapshot?worldId=${encodeURIComponent(id)}`);
-  return c.json(await res.json());
+  const body = (await res.json()) as { world?: { playerCountry?: string | null } };
+  // A member's seat lives on the roster, not in the sim payload, so a client
+  // that only reads the snapshot would never learn which country it holds.
+  const u = c.get("user");
+  if (u && body.world && !body.world.playerCountry) {
+    const row = await c.env.DB.prepare(`SELECT plays_country FROM world_members WHERE world_id = ? AND user_id = ?`)
+      .bind(id, u.id)
+      .first<{ plays_country: string | null }>();
+    if (row?.plays_country) body.world.playerCountry = row.plays_country;
+  }
+  return c.json(body);
 });
 
 app.get("/api/worlds/:id/patch", async (c) => {

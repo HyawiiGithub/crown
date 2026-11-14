@@ -650,7 +650,8 @@ export function WorldMap({ countries, control, regions, wars, layer, selected, p
                     style={{ cursor: "pointer" }}
                   />
                 )}
-                <path d={f.line} fill="none" stroke={f.ended ? "var(--ink-muted)" : "#ef4444"} strokeWidth={f.ended ? 1.2 : 1.8} strokeDasharray={f.ended ? "4 3" : undefined} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
+                <path d={f.line} fill="none" stroke={f.ended ? "var(--ink-muted)" : "#ef4444"} strokeWidth={f.ended ? 3 : 6} strokeOpacity={0.22} strokeLinecap="round" vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
+                <path d={f.line} fill="none" stroke={f.ended ? "var(--ink-muted)" : "#ef4444"} strokeWidth={f.ended ? 1.4 : 2.2} strokeLinecap="round" strokeDasharray={f.ended ? "4 3" : undefined} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
               </g>
             );
           })}
